@@ -42,6 +42,23 @@ def main() -> None:
         bank_block.extend(cards)
         blocks.append("\n\n".join(bank_block))
 
+    fully_checked = []
+    for bank in BANKS:
+        checks = [check for check in source_checks if check.bank == bank]
+        if checks and all(check.status == "ok" for check in checks):
+            fully_checked.append(bank)
+
+    no_actions = [
+        bank for bank in fully_checked
+        if not included_by_bank[bank]
+    ]
+    if no_actions:
+        blocks.append(
+            "<i>Без новых подтверждённых акций за неделю: "
+            + ", ".join(escape(bank) for bank in no_actions)
+            + ".</i>"
+        )
+
     if len(blocks) == 2:
         blocks.append("Подтверждённых новых акций за неделю не найдено.")
 
