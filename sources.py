@@ -80,8 +80,8 @@ BANK_SOURCES = [
         "bank": "ОТП Банк",
         "sources": [
             {"id": "otp_tg", "type": "telegram", "value": "otpbanknews", "required": True},
-            {"id": "otp_web_promos", "type": "web", "value": "https://www.otpbank.ru/retail/archive/promo/", "required": True},
-            {"id": "otp_web_card", "type": "web", "value": "https://www.otpbank.ru/retail/cards/debit/otpcard/", "required": False},
+            {"id": "otp_web_card", "type": "web", "value": "https://www.otpbank.ru/retail/cards/debit/otpcard/", "required": True},
+            {"id": "otp_web_new", "type": "web", "value": "https://www.otpbank.ru/new/", "required": False},
         ],
     },
     {
