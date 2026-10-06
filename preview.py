@@ -1,65 +1,142 @@
-from collector import collect_previous_week
+from __future__ import annotations
+
+import re
+
+from collector import Candidate, collect_previous_week
 from main import send_telegram
 
-MAX_SNIPPET = 700
+MAX_SUMMARY = 340
 
 
-def compact(text: str) -> str:
-    if len(text) <= MAX_SNIPPET:
+def sentences(text: str) -> list[str]:
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    return [p.strip() for p in parts if p.strip()]
+
+
+def clean_piece(text: str, limit: int = MAX_SUMMARY) -> str:
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) <= limit:
         return text
-    return text[: MAX_SNIPPET - 1].rstrip() + "…"
+    return text[: limit - 1].rstrip() + "…"
 
 
-def chunks(lines: list[str], limit: int = 3800) -> list[str]:
-    messages = []
-    current = ""
+def classify_goal(text: str) -> str:
+    low = text.lower()
 
-    for line in lines:
-        candidate = current + ("\n" if current else "") + line
-        if len(candidate) > limit and current:
-            messages.append(current)
-            current = line
-        else:
-            current = candidate
+    if any(x in low for x in ("новым клиент", "новые клиенты", "впервые", "оформите карту", "закажите карту")):
+        return "Привлечение новых клиентов"
 
-    if current:
-        messages.append(current)
-    return messages
+    if any(x in low for x in ("осаго", "каско", "страхован", "подключите", "оформите ")) and "карт" not in low:
+        return "Cross-sell"
+
+    return "Транзакционная активность текущих клиентов"
+
+
+def extract_reward(text: str) -> str:
+    for sentence in sentences(text):
+        low = sentence.lower()
+        if any(x in low for x in ("кешбэк", "кэшбэк", "бонус", "розыгрыш", "подар", "приз", "скидк", "промокод")):
+            if re.search(r"\d|%|₽|руб|балл", sentence, re.IGNORECASE):
+                return clean_piece(sentence, 240)
+
+    return "Вознаграждение есть, точный размер в публикации не выделен."
+
+
+def extract_mechanics(text: str) -> str:
+    selected = []
+    for sentence in sentences(text):
+        low = sentence.lower()
+        if any(
+            x in low
+            for x in (
+                "оформ",
+                "закаж",
+                "соверш",
+                "оплат",
+                "покуп",
+                "попол",
+                "сняти",
+                "снять",
+                "перевод",
+                "подключ",
+                "активир",
+                "зарегистр",
+                "участв",
+                "чтобы",
+            )
+        ):
+            selected.append(sentence)
+        if len(selected) == 2:
+            break
+
+    if selected:
+        return clean_piece(" ".join(selected))
+
+    return clean_piece(sentences(text)[0] if sentences(text) else text)
+
+
+def extract_dates(text: str) -> str:
+    patterns = [
+        r"\bс\s+\d{1,2}(?:\.\d{1,2}(?:\.\d{2,4})?)?\s+по\s+\d{1,2}(?:\.\d{1,2}(?:\.\d{2,4})?)?\b",
+        r"\bдо\s+\d{1,2}\s+[а-яё]+(?:\s+\d{4})?\b",
+        r"\bс\s+\d{1,2}\s+[а-яё]+(?:\s+по\s+\d{1,2}\s+[а-яё]+)?(?:\s+\d{4})?\b",
+        r"\b\d{1,2}\.\d{1,2}\.\d{2,4}\s*[-–—]\s*\d{1,2}\.\d{1,2}\.\d{2,4}\b",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(0)
+
+    return "Не указан в публикации"
+
+
+def make_title(item: Candidate) -> str:
+    for sentence in sentences(item.text):
+        low = sentence.lower()
+        if any(x in low for x in ("кешбэк", "кэшбэк", "розыгрыш", "бонус", "скидк", "промокод", "подар", "приз")):
+            title = re.sub(r"^[^\wА-Яа-яЁё0-9]+", "", sentence)
+            return clean_piece(title, 105)
+
+    return clean_piece(sentences(item.text)[0] if sentences(item.text) else "Новая акция", 105)
+
+
+def card(item: Candidate) -> str:
+    return (
+        f"<b>{item.bank} - {make_title(item)}</b>\n\n"
+        f"<b>Цель:</b> {classify_goal(item.text)}\n"
+        f"<b>Вознаграждение:</b> {extract_reward(item.text)}\n"
+        f"<b>Механика:</b> {extract_mechanics(item.text)}\n"
+        f"<b>Срок акции:</b> {extract_dates(item.text)}\n"
+        f"<b>Источник:</b> <a href=\"{item.url}\">официальная публикация</a>"
+    )
 
 
 def main() -> None:
     start, end, found, errors = collect_previous_week()
 
-    lines = [
-        "🧪 ЧЕРНОВИК МОНИТОРИНГА DAILY BANKING",
-        f"Период: {start:%d.%m.%Y} - {end:%d.%m.%Y}",
-        "",
-        "Первый автоматический слой: официальные Telegram-каналы банков.",
-        "Это список кандидатов для проверки, а не финальный выпуск.",
-        "",
-    ]
+    send_telegram(
+        f"📌 <b>Мониторинг акций Daily Banking</b>\n"
+        f"<b>Период:</b> {start:%d.%m.%Y} - {end:%d.%m.%Y}\n\n"
+        "В выпуск включены новые промо-механики за прошедшую календарную неделю."
+    )
 
-    total = 0
     for bank, candidates in found.items():
-        lines.append(f"🏦 {bank}")
-        if not candidates:
-            if bank in errors:
-                lines.append(f"⚠️ Источник не удалось проверить: {errors[bank]}")
-            else:
-                lines.append("Кандидаты по Telegram за период не найдены.")
-            lines.append("")
-            continue
-
-        total += len(candidates)
-        for item in candidates:
-            lines.append(f"• {item.published_at:%d.%m %H:%M} - {compact(item.text)}")
-            lines.append(item.url)
-        lines.append("")
-
-    lines.insert(3, f"Найдено кандидатов: {total}")
-
-    for message in chunks(lines):
-        send_telegram(message)
+        if candidates:
+            for item in candidates:
+                send_telegram(card(item))
+        elif bank in errors:
+            send_telegram(
+                f"<b>{bank}</b>\n"
+                "Источник не удалось проверить автоматически. "
+                "Банк требует ручной проверки в этом выпуске."
+            )
+        else:
+            send_telegram(
+                f"<b>{bank}</b>\n"
+                f"За период {start:%d.%m} - {end:%d.%m.%Y} "
+                "подходящих новых акций для мониторинга не найдено."
+            )
 
 
 if __name__ == "__main__":
