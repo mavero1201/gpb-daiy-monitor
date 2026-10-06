@@ -1,10 +1,17 @@
-name: Preview weekly monitor
+name: Weekly Daily Banking monitor
 
 on:
   workflow_dispatch:
+  schedule:
+    # 09:00 Moscow = 06:00 UTC. Moscow does not use DST.
+    - cron: "0 6 * * 1"
+
+concurrency:
+  group: weekly-daily-banking-monitor
+  cancel-in-progress: false
 
 jobs:
-  preview:
+  monitor:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,15 +29,18 @@ jobs:
       - name: Run regression baseline
         run: python -m unittest discover -s tests -p "test_*.py" -v
 
-      - name: Build preview and audit
+      - name: Build and publish monitor
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: "-1004291568481"
+          STRICT_SOURCES: ${{ github.event_name == 'schedule' && '1' || '0' }}
         run: python preview.py
 
       - name: Upload audit journal
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: weekly-monitor-audit
           path: artifacts/
+          if-no-files-found: ignore
           retention-days: 90
