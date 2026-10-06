@@ -40,7 +40,19 @@ def main() -> None:
     for bank in BANKS:
         blocks.extend(included_by_bank[bank])
 
-    no_actions = [bank for bank in BANKS if not included_by_bank[bank]]
+    fully_checked = []
+    incomplete_check = []
+    for bank in BANKS:
+        bank_checks = [check for check in source_checks if check.bank == bank]
+        if bank_checks and all(check.status == "ok" for check in bank_checks):
+            fully_checked.append(bank)
+        else:
+            incomplete_check.append(bank)
+
+    no_actions = [
+        bank for bank in fully_checked
+        if not included_by_bank[bank]
+    ]
     if no_actions:
         blocks.append(
             "<b>Подходящих подтверждённых акций не найдено:</b> "
@@ -53,7 +65,7 @@ def main() -> None:
             for bank, ids in source_gaps.items()
         )
         blocks.append(
-            "<b>Источники, которые этот запуск не проверил:</b> " + affected
+            "<b>Проверка не завершена по всем источникам:</b> " + affected
         )
 
     full = "\n\n".join(blocks)
