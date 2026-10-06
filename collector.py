@@ -461,8 +461,9 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
     )
 
 
-def collect_previous_week() -> tuple[datetime, datetime, list[RawItem], list[SourceCheck]]:
+def collect_previous_week(recovery_days: int = 7) -> tuple[datetime, datetime, list[RawItem], list[SourceCheck]]:
     start, end = previous_calendar_week()
+    scan_start = start - timedelta(days=recovery_days)
     items: list[RawItem] = []
     checks: list[SourceCheck] = []
 
@@ -470,9 +471,9 @@ def collect_previous_week() -> tuple[datetime, datetime, list[RawItem], list[Sou
         bank = bank_entry["bank"]
         for source in bank_entry["sources"]:
             if source["type"] == "telegram":
-                source_items, check = fetch_telegram_source(bank, source, start, end)
+                source_items, check = fetch_telegram_source(bank, source, scan_start, end)
             elif source["type"] == "web":
-                source_items, check = fetch_web_source(bank, source, start, end)
+                source_items, check = fetch_web_source(bank, source, scan_start, end)
             else:
                 source_items = []
                 check = SourceCheck(
