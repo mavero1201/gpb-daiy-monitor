@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from html import unescape
 from zoneinfo import ZoneInfo
+from urllib.parse import urlparse
 import re
 
 import requests
@@ -96,6 +97,8 @@ class Candidate:
     published_at: datetime
     text: str
     url: str
+    external_links: list[str]
+    validation_text: str = ""
 
 
 def previous_calendar_week(now: datetime | None = None) -> tuple[datetime, datetime]:
@@ -121,8 +124,6 @@ def looks_relevant(text: str) -> bool:
     has_reward = bool(REWARD_RE.search(text))
     has_strong_promo = any(term in low for term in ("розыгрыш", "промокод", "подар"))
 
-    # Нам нужна именно промо-механика daily banking/cross-sell,
-    # а не любой пост, где случайно упомянут кешбэк или карта.
     return has_promo and has_banking_context and has_action and (has_reward or has_strong_promo)
 
 
@@ -130,6 +131,49 @@ def clean_text(text: str) -> str:
     text = unescape(text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
+
+
+def is_external_link(url: str) -> bool:
+    try:
+        host = urlparse(url).netloc.lower()
+    except ValueError:
+        return False
+    return bool(host) and "t.me" not in host and "telegram.me" not in host
+
+
+def fetch_page_text(url: str) -> str:
+    try:
+        response = requests.get(
+            url,
+            timeout=20,
+            headers={"User-Agent": "Mozilla/5.0 GPB-Daily-Monitor/1.0"},
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+        content_type = response.headers.get("content-type", "").lower()
+        if "text/html" not in content_type:
+            return ""
+        soup = BeautifulSoup(response.text, "html.parser")
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+        return clean_text(soup.get_text(" ", strip=True))[:30000]
+    except Exception:
+        return ""
+
+
+def enrich_validation_text(post_text: str, external_links: list[str]) -> str:
+    parts = [post_text]
+    checked = 0
+    for link in external_links:
+        if not is_external_link(link):
+            continue
+        page_text = fetch_page_text(link)
+        if page_text:
+            parts.append(page_text)
+            checked += 1
+        if checked >= 3:
+            break
+    return clean_text(" ".join(parts))
 
 
 def fetch_telegram_candidates(bank: str, channel: str, start: datetime, end: datetime) -> list[Candidate]:
@@ -168,12 +212,22 @@ def fetch_telegram_candidates(bank: str, channel: str, start: datetime, end: dat
         if not text or not looks_relevant(text):
             continue
 
+        links = []
+        for a in wrap.select("a[href]"):
+            href = a.get("href")
+            if href and href not in links:
+                links.append(href)
+
+        validation_text = enrich_validation_text(text, links)
+
         items.append(
             Candidate(
                 bank=bank,
                 published_at=published,
                 text=text,
                 url=link_tag.get("href", url),
+                external_links=links,
+                validation_text=validation_text,
             )
         )
 
