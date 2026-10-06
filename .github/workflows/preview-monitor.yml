@@ -19,8 +19,18 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Build and send preview
+      - name: Run regression baseline
+        run: python -m unittest tests/test_regression.py -v
+
+      - name: Build preview and audit
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: "-1004291568481"
         run: python preview.py
+
+      - name: Upload audit journal
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-monitor-audit
+          path: artifacts/
+          retention-days: 90
