@@ -26,7 +26,7 @@ BANK_SOURCES = [
         "bank": "Сбер",
         "sources": [
             {"id": "sber_tg", "type": "telegram", "value": "sberbank", "required": True},
-            {"id": "sber_web_cards", "type": "web", "value": "https://www.sberbank.com/ru/person/bank_cards", "required": False},
+            {"id": "sber_web_cards", "type": "web", "value": "https://www.sberbank.com/ru/person/bank_cards", "required": True},
         ],
     },
     {
@@ -80,8 +80,8 @@ BANK_SOURCES = [
         "bank": "ОТП Банк",
         "sources": [
             {"id": "otp_tg", "type": "telegram", "value": "otpbanknews", "required": True},
-            {"id": "otp_web_card", "type": "web", "value": "https://www.otpbank.ru/retail/cards/debit/otpcard/", "required": True},
-            {"id": "otp_web_cards", "type": "web", "value": "https://www.otpbank.ru/retail/cards/debit/cards/", "required": False},
+            {"id": "otp_web_promos", "type": "web", "value": "https://www.otpbank.ru/retail/archive/promo/", "required": True},
+            {"id": "otp_web_card", "type": "web", "value": "https://www.otpbank.ru/retail/cards/debit/otpcard/", "required": False},
         ],
     },
     {
