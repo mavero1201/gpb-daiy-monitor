@@ -65,11 +65,36 @@ def classify_mechanic(text: str) -> str:
 
 
 def make_title(item: Candidate) -> str:
-    # Заголовок не обрезаем: пользователь должен видеть полное название/суть акции.
-    for sentence in sentences(item.text):
+    text = item.text
+    low = text.lower()
+
+    # Сначала собираем короткое содержательное название, не копируя весь пост.
+    steam = re.search(r"(розыгрыш[^.!?]{0,120}Steam|Steam[^.!?]{0,120}розыгрыш)", text, re.IGNORECASE)
+    if steam:
+        phrase = steam.group(0)
+        reward = re.search(r"\d[\d\s]*\s*₽", phrase)
+        return f"Розыгрыш {reward.group(0)} за пополнение Steam" if reward else "Розыгрыш за пополнение Steam"
+
+    apple = re.search(r"скидк[^.!?]{0,120}Apple ID", text, re.IGNORECASE)
+    if apple:
+        return re.sub(r"^(Дарим\s+)?", "", apple.group(0), flags=re.IGNORECASE).strip().capitalize()
+
+    cafe = re.search(r"(?:кешбэк|кэшбэк)\s*20%[^.!?]{0,120}(?:кафе|ресторан)", text, re.IGNORECASE)
+    if cafe:
+        return "20% кешбэка в кафе и ресторанах для новых клиентов"
+
+    gold = re.search(r"(?:кешбэк|кэшбэк)\s*50%[^.!?]{0,120}Золот", text, re.IGNORECASE)
+    if gold:
+        return "50% кешбэка в «Золотом Яблоке»"
+
+    for sentence in sentences(text):
         if any(word in sentence.lower() for word in PROMO_WORDS):
-            return re.sub(r"^[^\wА-Яа-яЁё0-9]+", "", sentence).strip()
-    return sentences(item.text)[0] if sentences(item.text) else "Новая акция"
+            # Полное предложение не режем посередине, но убираем вводные слова.
+            title = re.sub(r"^[^\wА-Яа-яЁё0-9]+", "", sentence).strip()
+            title = re.sub(r"^(Дарим|Получайте|Получите|Оформляйте)\s+", "", title, flags=re.IGNORECASE)
+            return title
+
+    return "Новая акция"
 
 
 def reward_sentence(text: str) -> str:
@@ -103,23 +128,17 @@ def conditions_sentence(text: str, excluded: set[str]) -> str:
 
 
 def description_sentence(text: str, excluded: set[str]) -> str:
-    # Описание отвечает на "что это за предложение / для кого", а не повторяет выгоду.
+    # Описание - кому и про что предложение, без повторения выгоды и условий.
     for sentence in sentences(text):
         if sentence in excluded:
             continue
         low = sentence.lower()
-        if any(
-            marker in low
-            for marker in (
-                "для новых", "для действующих", "все владельцы", "владельц",
-                "клиент", "участник", "карта", "сервис", "предложение",
-            )
-        ):
+        if any(marker in low for marker in (
+            "новым клиент", "текущим клиент", "действующим клиент",
+            "владельц", "участник", "клиент банка",
+        )):
             return sentence
 
-    for sentence in sentences(text):
-        if sentence not in excluded:
-            return sentence
     return ""
 
 
@@ -241,17 +260,19 @@ def verified_card(item: Candidate) -> str | None:
     excluded.add(conditions)
     description = description_sentence(evidence, excluded)
 
-    return (
-        f"<b>{escape(item.bank)} - {escape(title)}</b>\n"
-        f"<b>Опубликовано:</b> {item.published_at:%d.%m.%Y}\n"
-        f"<b>Описание:</b> {escape(description) if description else 'Промо-предложение банка.'}\n"
-        f"<b>Цель:</b> {escape(classify_goal(evidence))}\n"
-        f"<b>Механика:</b> {escape(classify_mechanic(evidence))}\n"
-        f"<b>Вознаграждение:</b> {escape(reward)}\n"
-        f"<b>Условия:</b> {escape(conditions)}\n"
-        f"<b>Срок акции:</b> {format_period(start, end)}\n"
-        f"<b>Источник:</b> <a href=\"{escape(item.url, quote=True)}\">ссылка на акцию</a>"
-    )
+    lines = [
+        f"<b>{escape(item.bank)} - {escape(title)}</b>",
+    ]
+    if description:
+        lines.append(f"<b>Описание:</b> {escape(description)}")
+    lines.extend([
+        f"<b>Вознаграждение:</b> {escape(reward)}",
+        f"<b>Условия:</b> {escape(conditions)}",
+        f"<b>Механика:</b> {escape(classify_mechanic(evidence))}; {escape(classify_goal(evidence))}",
+        f"<b>Срок акции:</b> {format_period(start, end)}",
+        f"<b>Источник:</b> <a href=\"{escape(item.url, quote=True)}\">ссылка на акцию</a>",
+    ])
+    return "\n".join(lines)
 
 
 def main() -> None:
