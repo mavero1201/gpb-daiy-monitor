@@ -13,7 +13,7 @@ from sources import SOURCES
 
 MOSCOW = ZoneInfo("Europe/Moscow")
 
-POSITIVE_KEYWORDS = (
+PROMO_SIGNALS = (
     "акци",
     "кешбэк",
     "кэшбэк",
@@ -22,33 +22,71 @@ POSITIVE_KEYWORDS = (
     "подар",
     "скидк",
     "промокод",
+    "выигра",
+    "приз",
     "вернем",
     "вернём",
+    "возвращаем",
+)
+
+ACTION_SIGNALS = (
+    "оформ",
+    "закаж",
+    "соверш",
+    "оплат",
+    "покуп",
+    "попол",
+    "сняти",
+    "снять",
+    "перевод",
+    "подключ",
+    "активир",
+    "зарегистр",
+    "участв",
     "получите",
     "получайте",
-    "100%",
-    "50%",
-    "25%",
-    "20%",
-    "15%",
-    "10%",
-    "5%",
-    "друг",
-    "реферал",
-    "покупк",
+)
+
+BANKING_CONTEXT = (
+    "карт",
+    "дебетов",
+    "счет",
+    "счёт",
+    "платеж",
     "оплат",
-    "сняти",
+    "покуп",
     "перевод",
     "попол",
+    "сняти",
+    "банкомат",
+    "кешбэк",
+    "кэшбэк",
+    "балл",
+    "кошелек",
+    "кошелёк",
+    "вклад",
+    "страхован",
+    "осаго",
+    "каско",
+    "pay",
+    "пэй",
 )
 
 EXCLUDE_KEYWORDS = (
     "детская карта",
     "детской карт",
+    "детских карт",
     "для детей",
+    "альфа-картах для детей",
     "premium",
     "private banking",
     "премиальн",
+)
+
+REWARD_RE = re.compile(
+    r"(?:\b\d{1,3}\s?%\b|\b\d[\d\s]{2,}\s?(?:₽|руб(?:лей|ля|ль|\.)?)\b|"
+    r"\b\d[\d\s]{0,}\s?(?:балл(?:ов|а)?|бонус(?:ов|а)?)\b)",
+    re.IGNORECASE,
 )
 
 
@@ -73,9 +111,19 @@ def previous_calendar_week(now: datetime | None = None) -> tuple[datetime, datet
 
 def looks_relevant(text: str) -> bool:
     low = text.lower()
+
     if any(term in low for term in EXCLUDE_KEYWORDS):
         return False
-    return any(term in low for term in POSITIVE_KEYWORDS)
+
+    has_promo = any(term in low for term in PROMO_SIGNALS)
+    has_action = any(term in low for term in ACTION_SIGNALS)
+    has_banking_context = any(term in low for term in BANKING_CONTEXT)
+    has_reward = bool(REWARD_RE.search(text))
+    has_strong_promo = any(term in low for term in ("розыгрыш", "промокод", "подар"))
+
+    # Нам нужна именно промо-механика daily banking/cross-sell,
+    # а не любой пост, где случайно упомянут кешбэк или карта.
+    return has_promo and has_banking_context and has_action and (has_reward or has_strong_promo)
 
 
 def clean_text(text: str) -> str:
