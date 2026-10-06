@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from html import escape
+import os
 
 from main import send_telegram
 from pipeline import run_pipeline, write_audit
@@ -22,6 +23,21 @@ def card(item, result) -> str:
 def main() -> None:
     start, end, evaluated, source_checks = run_pipeline()
     write_audit(start, end, evaluated, source_checks)
+
+    strict_sources = os.getenv("STRICT_SOURCES") == "1"
+    incomplete_required_sources = [
+        check for check in source_checks
+        if check.status != "ok"
+    ]
+    if strict_sources and incomplete_required_sources:
+        details = ", ".join(
+            f"{check.bank}:{check.source_id}:{check.status}"
+            for check in incomplete_required_sources
+        )
+        raise RuntimeError(
+            "Automatic publication stopped because required sources were not fully checked: "
+            + details
+        )
 
     included_by_bank = {bank: [] for bank in BANKS}
     for item, result in evaluated:
