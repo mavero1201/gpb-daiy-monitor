@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from calendar import monthrange
 from datetime import date
 from html import escape
 import re
@@ -22,65 +23,104 @@ MONTHS = {
     "декабря": 12,
 }
 
+PROMO_WORDS = (
+    "кешбэк", "кэшбэк", "розыгрыш", "бонус", "скидк", "промокод",
+    "подар", "приз", "вернём", "вернем",
+)
+
+ACTION_WORDS = (
+    "оформ", "закаж", "соверш", "оплат", "покуп", "попол", "сняти", "снять",
+    "перевод", "подключ", "активир", "зарегистр", "участв", "чтобы",
+)
+
 
 def sentences(text: str) -> list[str]:
     parts = re.split(r"(?<=[.!?])\s+", text.strip())
-    return [p.strip() for p in parts if p.strip()]
-
-
-def compact(text: str, limit: int) -> str:
-    text = re.sub(r"\s+", " ", text).strip()
-    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+    return [re.sub(r"\s+", " ", p).strip() for p in parts if p.strip()]
 
 
 def classify_goal(text: str) -> str:
     low = text.lower()
-
-    if any(x in low for x in ("новым клиент", "новые клиенты", "впервые", "оформите карту", "закажите карту")):
+    if any(x in low for x in ("новым клиент", "новые клиенты", "новым владельц", "впервые оформ")):
         return "привлечение новых клиентов"
-
-    if any(x in low for x in ("осаго", "каско", "страхован", "подключите", "оформите ")) and "карт" not in low:
-        return "cross-sell"
-
+    if any(x in low for x in ("осаго", "каско", "страхован", "подписк", "накопительн")):
+        return "cross-sell / развитие использования продуктов"
     return "транзакционная активность текущих клиентов"
 
 
-def extract_reward(text: str) -> str:
+def classify_mechanic(text: str) -> str:
+    low = text.lower()
+    mechanics = []
+    if "розыгрыш" in low or "разыгрыв" in low:
+        mechanics.append("розыгрыш")
+    if "реферал" in low or "пригласите друга" in low or "рекомендац" in low:
+        mechanics.append("реферальная программа")
+    if "кешбэк" in low or "кэшбэк" in low:
+        mechanics.append("кешбэк")
+    if "скидк" in low or "промокод" in low:
+        mechanics.append("скидка / промокод")
+    if "бонус" in low or "балл" in low:
+        mechanics.append("бонусы")
+    return ", ".join(dict.fromkeys(mechanics)) or "промо-механика"
+
+
+def make_title(item: Candidate) -> str:
+    # Заголовок не обрезаем: пользователь должен видеть полное название/суть акции.
+    for sentence in sentences(item.text):
+        if any(word in sentence.lower() for word in PROMO_WORDS):
+            return re.sub(r"^[^\wА-Яа-яЁё0-9]+", "", sentence).strip()
+    return sentences(item.text)[0] if sentences(item.text) else "Новая акция"
+
+
+def reward_sentence(text: str) -> str:
+    ranked = []
     for sentence in sentences(text):
         low = sentence.lower()
-        if any(x in low for x in ("кешбэк", "кэшбэк", "бонус", "розыгрыш", "подар", "приз", "скидк", "промокод")):
-            if re.search(r"\d|%|₽|руб|балл", sentence, re.IGNORECASE):
-                return compact(sentence, 190)
-    return ""
+        if any(x in low for x in PROMO_WORDS) and re.search(r"\d|%|₽|руб|балл", sentence, re.IGNORECASE):
+            score = 0
+            if "%" in sentence or "₽" in sentence or "руб" in low:
+                score += 2
+            if "максим" in low or "призовой фонд" in low:
+                score += 1
+            ranked.append((score, sentence))
+    if not ranked:
+        return ""
+    ranked.sort(key=lambda x: x[0], reverse=True)
+    return ranked[0][1]
 
 
-def extract_mechanics(text: str) -> str:
-    selected = []
+def conditions_sentence(text: str, excluded: set[str]) -> str:
+    picked = []
     for sentence in sentences(text):
+        if sentence in excluded:
+            continue
+        low = sentence.lower()
+        if any(word in low for word in ACTION_WORDS):
+            picked.append(sentence)
+        if len(picked) == 2:
+            break
+    return " ".join(picked)
+
+
+def description_sentence(text: str, excluded: set[str]) -> str:
+    # Описание отвечает на "что это за предложение / для кого", а не повторяет выгоду.
+    for sentence in sentences(text):
+        if sentence in excluded:
+            continue
         low = sentence.lower()
         if any(
-            x in low
-            for x in (
-                "оформ",
-                "закаж",
-                "соверш",
-                "оплат",
-                "покуп",
-                "попол",
-                "сняти",
-                "снять",
-                "перевод",
-                "подключ",
-                "активир",
-                "зарегистр",
-                "участв",
-                "чтобы",
+            marker in low
+            for marker in (
+                "для новых", "для действующих", "все владельцы", "владельц",
+                "клиент", "участник", "карта", "сервис", "предложение",
             )
         ):
-            selected.append(sentence)
-        if len(selected) == 2:
-            break
-    return compact(" ".join(selected), 230) if selected else ""
+            return sentence
+
+    for sentence in sentences(text):
+        if sentence not in excluded:
+            return sentence
+    return ""
 
 
 def parse_numeric_date(day: str, month: str, year: str) -> date | None:
@@ -97,8 +137,7 @@ def format_period(start: date, end: date) -> str:
     return f"{start:%d.%m.%Y} - {end:%d.%m.%Y}"
 
 
-def extract_promo_period(text: str) -> str | None:
-    # 01.10.2026 - 31.10.2026 / с 01.10.2026 по 31.10.2026
+def extract_promo_period(text: str, publication_date: date) -> tuple[date, date] | None:
     numeric = re.search(
         r"(?:с\s*)?(\d{1,2})[./](\d{1,2})[./](\d{2,4})\s*(?:-|–|—|по)\s*"
         r"(\d{1,2})[./](\d{1,2})[./](\d{2,4})",
@@ -109,11 +148,10 @@ def extract_promo_period(text: str) -> str | None:
         start = parse_numeric_date(numeric.group(1), numeric.group(2), numeric.group(3))
         end = parse_numeric_date(numeric.group(4), numeric.group(5), numeric.group(6))
         if start and end and start <= end:
-            return format_period(start, end)
+            return start, end
 
     month_names = "|".join(MONTHS.keys())
 
-    # с 1 октября 2026 по 31 октября 2026
     full_words = re.search(
         rf"с\s+(\d{{1,2}})\s+({month_names})\s+(\d{{4}})\s+по\s+"
         rf"(\d{{1,2}})\s+({month_names})\s+(\d{{4}})",
@@ -124,9 +162,8 @@ def extract_promo_period(text: str) -> str | None:
         start = date(int(full_words.group(3)), MONTHS[full_words.group(2).lower()], int(full_words.group(1)))
         end = date(int(full_words.group(6)), MONTHS[full_words.group(5).lower()], int(full_words.group(4)))
         if start <= end:
-            return format_period(start, end)
+            return start, end
 
-    # с 1 октября по 31 октября 2026
     shared_year = re.search(
         rf"с\s+(\d{{1,2}})\s+({month_names})\s+по\s+"
         rf"(\d{{1,2}})\s+({month_names})\s+(\d{{4}})",
@@ -138,53 +175,81 @@ def extract_promo_period(text: str) -> str | None:
         start = date(year, MONTHS[shared_year.group(2).lower()], int(shared_year.group(1)))
         end = date(year, MONTHS[shared_year.group(4).lower()], int(shared_year.group(3)))
         if start <= end:
-            return format_period(start, end)
+            return start, end
 
-    # с 1 по 4 октября 2026 / 1-4 октября 2026
+    # "с 28 сентября по 4 октября" - год берём из даты публикации.
+    cross_month_no_year = re.search(
+        rf"с\s+(\d{{1,2}})\s+({month_names})\s+по\s+"
+        rf"(\d{{1,2}})\s+({month_names})(?!\s+\d{{4}})",
+        text,
+        re.IGNORECASE,
+    )
+    if cross_month_no_year:
+        year = publication_date.year
+        start = date(year, MONTHS[cross_month_no_year.group(2).lower()], int(cross_month_no_year.group(1)))
+        end = date(year, MONTHS[cross_month_no_year.group(4).lower()], int(cross_month_no_year.group(3)))
+        if start <= end:
+            return start, end
+
     same_month = re.search(
-        rf"(?:с\s+)?(\d{{1,2}})\s*(?:-|–|—|по)\s*(\d{{1,2}})\s+({month_names})\s+(\d{{4}})",
+        rf"(?:с\s+)?(\d{{1,2}})\s*(?:-|–|—|по)\s*(\d{{1,2}})\s+({month_names})(?:\s+(\d{{4}}))?",
         text,
         re.IGNORECASE,
     )
     if same_month:
-        year = int(same_month.group(4))
+        year = int(same_month.group(4)) if same_month.group(4) else publication_date.year
         month = MONTHS[same_month.group(3).lower()]
         start = date(year, month, int(same_month.group(1)))
         end = date(year, month, int(same_month.group(2)))
         if start <= end:
-            return format_period(start, end)
+            return start, end
+
+    # "весь октябрь" / "в течение октября" - нормализуем до календарных границ месяца.
+    whole_month = re.search(
+        rf"(?:весь|всю|в\s+течение)\s+({month_names})",
+        text,
+        re.IGNORECASE,
+    )
+    if whole_month:
+        month = MONTHS[whole_month.group(1).lower()]
+        year = publication_date.year
+        return date(year, month, 1), date(year, month, monthrange(year, month)[1])
 
     return None
 
 
-def make_title(item: Candidate) -> str:
-    for sentence in sentences(item.text):
-        low = sentence.lower()
-        if any(x in low for x in ("кешбэк", "кэшбэк", "розыгрыш", "бонус", "скидк", "промокод", "подар", "приз")):
-            title = re.sub(r"^[^\wА-Яа-яЁё0-9]+", "", sentence)
-            return compact(title, 90)
-    return compact(sentences(item.text)[0] if sentences(item.text) else "Новая акция", 90)
-
-
 def verified_card(item: Candidate) -> str | None:
     evidence = item.validation_text or item.text
-    period = extract_promo_period(evidence)
-    reward = extract_reward(evidence)
-    mechanics = extract_mechanics(evidence)
+    period = extract_promo_period(evidence, item.published_at.date())
+    reward = reward_sentence(evidence)
 
-    # Жёсткое правило мониторинга:
-    # без подтверждённого полного срока акции, вознаграждения и механики
-    # акция в Telegram-выпуск не попадает.
-    if not period or not reward or not mechanics:
+    if not period or not reward:
         return None
 
+    start, end = period
+
+    # Отсеиваем старые/нерелевантные страницы: акция не может уже закончиться
+    # к моменту публикации, которая привела нас к ней.
+    if end < item.published_at.date():
+        return None
+
+    title = make_title(item)
+    excluded = {title, reward}
+    conditions = conditions_sentence(evidence, excluded)
+    if not conditions:
+        return None
+    excluded.add(conditions)
+    description = description_sentence(evidence, excluded)
+
     return (
-        f"<b>{escape(item.bank)} - {escape(make_title(item))}</b>\n"
+        f"<b>{escape(item.bank)} - {escape(title)}</b>\n"
         f"<b>Опубликовано:</b> {item.published_at:%d.%m.%Y}\n"
+        f"<b>Описание:</b> {escape(description) if description else 'Промо-предложение банка.'}\n"
         f"<b>Цель:</b> {escape(classify_goal(evidence))}\n"
+        f"<b>Механика:</b> {escape(classify_mechanic(evidence))}\n"
         f"<b>Вознаграждение:</b> {escape(reward)}\n"
-        f"<b>Механика:</b> {escape(mechanics)}\n"
-        f"<b>Срок акции:</b> {period}\n"
+        f"<b>Условия:</b> {escape(conditions)}\n"
+        f"<b>Срок акции:</b> {format_period(start, end)}\n"
         f"<b>Источник:</b> <a href=\"{escape(item.url, quote=True)}\">ссылка на акцию</a>"
     )
 
@@ -212,70 +277,46 @@ def main() -> None:
         else:
             no_actions.append(bank)
 
-    blocks = [
-        "📌 <b>Мониторинг акций Daily Banking</b>",
-        f"<b>Публикации за неделю:</b> {start:%d.%m.%Y} - {end:%d.%m.%Y}",
-        "",
-    ]
+    header = (
+        "📌 <b>Мониторинг акций Daily Banking</b>\n"
+        f"<b>Новые акции, опубликованные за неделю:</b> {start:%d.%m.%Y} - {end:%d.%m.%Y}"
+    )
 
-    if cards:
-        blocks.append("\n\n".join(cards))
-    else:
-        blocks.append("Подтверждённых новых акций за неделю не найдено.")
-
+    footer = []
     if no_actions:
-        blocks.extend([
-            "",
-            "<b>Подходящих подтверждённых акций не найдено:</b>",
-            ", ".join(escape(x) for x in no_actions),
-        ])
-
-    if manual_check:
-        blocks.extend([
-            "",
-            "<b>Не удалось проверить автоматически:</b>",
-            ", ".join(escape(x) for x in manual_check),
-        ])
-
-    message = "\n".join(blocks)
-
-    # Telegram ограничивает одно сообщение 4096 символами.
-    # Стремимся к одному посту; если лимит превышен, делим только по карточкам.
-    if len(message) <= 4000:
-        send_telegram(message)
-        return
-
-    header = "\n".join(blocks[:3])
-    footer_parts = []
-    if no_actions:
-        footer_parts.append(
+        footer.append(
             "<b>Подходящих подтверждённых акций не найдено:</b> "
             + ", ".join(escape(x) for x in no_actions)
         )
     if manual_check:
-        footer_parts.append(
+        footer.append(
             "<b>Не удалось проверить автоматически:</b> "
             + ", ".join(escape(x) for x in manual_check)
         )
 
+    blocks = [header]
+    if cards:
+        blocks.extend(cards)
+    else:
+        blocks.append("Подтверждённых новых акций за неделю не найдено.")
+    blocks.extend(footer)
+
+    # Одно полотно - приоритет. Telegram допускает 4096 символов.
+    full_message = "\n\n".join(blocks)
+    if len(full_message) <= 4000:
+        send_telegram(full_message)
+        return
+
+    # Если физически не помещается, делим только по карточкам, не по банкам.
     parts = []
     current = header
-    for card in cards:
-        candidate = current + "\n\n" + card
+    for block in blocks[1:]:
+        candidate = current + "\n\n" + block
         if len(candidate) > 3900 and current != header:
             parts.append(current)
-            current = card
+            current = block
         else:
             current = candidate
-
-    if footer_parts:
-        footer = "\n\n" + "\n".join(footer_parts)
-        if len(current + footer) <= 4000:
-            current += footer
-        else:
-            parts.append(current)
-            current = "\n".join(footer_parts)
-
     if current:
         parts.append(current)
 
