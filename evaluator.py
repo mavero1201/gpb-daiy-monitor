@@ -95,7 +95,19 @@ def fetch_page_text(url: str) -> str:
             tag.decompose()
         return clean_text(soup.get_text(" ", strip=True))[:40000]
     except Exception:
-        return ""
+        try:
+            response = requests.get(
+                "https://r.jina.ai/" + url,
+                timeout=45,
+                headers={
+                    "User-Agent": "Mozilla/5.0 GPB-Daily-Monitor/3.2",
+                    "Accept": "text/plain",
+                },
+            )
+            response.raise_for_status()
+            return clean_text(response.text)[:40000]
+        except Exception:
+            return ""
 
 
 def build_evidence(item: RawItem) -> tuple[str, str]:
