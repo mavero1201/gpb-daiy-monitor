@@ -22,6 +22,7 @@ def send_telegram(text: str) -> None:
             "chat_id": chat_id,
             "text": text,
             "disable_web_page_preview": True,
+            "parse_mode": "HTML",
         },
         timeout=30,
     )
