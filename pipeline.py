@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
+import re
 
 from collector import collect_previous_week
 from evaluator import evaluate
@@ -11,9 +12,54 @@ from sources import BANKS
 ARTIFACT_DIR = Path("artifacts")
 
 
+def _reward_fingerprint(text: str) -> tuple[str, ...]:
+    values = re.findall(r"\d[\d\s]*(?:%|₽|руб(?:лей|ля|ль|\.)?)", text.lower())
+    return tuple(re.sub(r"\s+", "", value) for value in values)
+
+
+def _duplicate_key(item, result):
+    if not result.included:
+        return None
+    return (
+        item.bank,
+        result.promo_start,
+        result.promo_end,
+        result.mechanic,
+        _reward_fingerprint(result.reward),
+    )
+
+
+def _mark_duplicates(evaluated):
+    # Telegram и сайт могут привести к одной и той же акции.
+    # В audit сохраняем оба обнаружения, но в выпуск пропускаем одно.
+    seen = {}
+    for item, result in evaluated:
+        key = _duplicate_key(item, result)
+        if key is None:
+            continue
+
+        if key not in seen:
+            seen[key] = (item, result)
+            continue
+
+        first_item, first_result = seen[key]
+
+        # При равных данных предпочитаем карточку из Telegram:
+        # обычно там чище название, а условия уже могут быть верифицированы
+        # через официальный сайт по внешней ссылке.
+        if first_item.source_type == "web" and item.source_type == "telegram":
+            first_result.included = False
+            first_result.reason = "duplicate"
+            seen[key] = (item, result)
+        else:
+            result.included = False
+            result.reason = "duplicate"
+
+
 def run_pipeline():
     start, end, raw_items, source_checks = collect_previous_week()
     evaluated = [(item, evaluate(item)) for item in raw_items]
+    _mark_duplicates(evaluated)
     return start, end, evaluated, source_checks
 
 
@@ -25,13 +71,14 @@ def write_audit(start, end, evaluated, source_checks):
     with item_path.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.writer(f, delimiter=";")
         writer.writerow([
-            "bank", "source_id", "published_at", "url", "included", "reason",
-            "promo_start", "promo_end", "title",
+            "bank", "source_id", "source_type", "published_at", "url",
+            "included", "reason", "promo_start", "promo_end", "title",
         ])
         for item, result in evaluated:
             writer.writerow([
                 item.bank,
                 item.source_id,
+                item.source_type,
                 item.published_at.isoformat(),
                 item.url,
                 result.included,
