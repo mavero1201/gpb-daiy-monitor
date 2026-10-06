@@ -347,21 +347,48 @@ def _http_get(url: str):
         return requests.get(url, verify=False, **kwargs)
 
 
-def _fetch_document(url: str) -> tuple[str, BeautifulSoup | None, str]:
-    response = _http_get(url)
+def _reader_fetch(url: str) -> tuple[str, BeautifulSoup | None, str]:
+    reader_url = "https://r.jina.ai/" + url
+    response = requests.get(
+        reader_url,
+        timeout=45,
+        headers={
+            "User-Agent": "Mozilla/5.0 GPB-Daily-Monitor/3.2",
+            "Accept": "text/plain",
+        },
+    )
     response.raise_for_status()
-    final_url = response.url
-    content_type = response.headers.get("content-type", "").lower()
+    text = clean_text(response.text)
+    if len(text) < 100:
+        raise RuntimeError("Reader returned too little readable content")
+    return text[:60000], None, url
 
-    if "pdf" in content_type or final_url.lower().endswith(".pdf"):
-        text = _pdf_text(response.content)
-        return text, None, final_url
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    for tag in soup(["script", "style", "noscript", "svg"]):
-        tag.decompose()
-    text = clean_text(soup.get_text(" ", strip=True))
-    return text[:60000], soup, final_url
+def _fetch_document(url: str) -> tuple[str, BeautifulSoup | None, str]:
+    try:
+        response = _http_get(url)
+        response.raise_for_status()
+        final_url = response.url
+        content_type = response.headers.get("content-type", "").lower()
+
+        if "pdf" in content_type or final_url.lower().endswith(".pdf"):
+            text = _pdf_text(response.content)
+            if len(text) >= 100:
+                return text, None, final_url
+            return _reader_fetch(url)
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        for tag in soup(["script", "style", "noscript", "svg"]):
+            tag.decompose()
+        text = clean_text(soup.get_text(" ", strip=True))
+        if len(text) >= 100:
+            return text[:60000], soup, final_url
+    except Exception:
+        pass
+
+    # Fallback для сайтов с WAF/JS-защитой: Jina Reader только рендерит
+    # тот же официальный URL. Источником в карточке остаётся адрес банка.
+    return _reader_fetch(url)
 
 
 def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) -> tuple[list[RawItem], SourceCheck]:
@@ -407,9 +434,18 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
             label = clean_text(a.get_text(" ", strip=True))
             if _looks_like_candidate_link(label, absolute) and absolute not in candidate_urls:
                 candidate_urls.append(absolute)
+    else:
+        # Jina Reader возвращает Markdown. Извлекаем ссылки из него и
+        # продолжаем обход официальных карточек/правил банка.
+        for label, href in re.findall(r"\[([^\]]*)\]\((https?://[^)\s]+)\)", root_text):
+            href = href.rstrip(".,;")
+            if not _same_domain(href, final_root):
+                continue
+            if _looks_like_candidate_link(clean_text(label), href) and href not in candidate_urls:
+                candidate_urls.append(href)
 
     # Ограничиваем обход, чтобы один тяжёлый сайт не блокировал недельный выпуск.
-    for url in candidate_urls[:80]:
+    for url in candidate_urls[:35]:
         if url in seen_urls:
             continue
         seen_urls.add(url)
