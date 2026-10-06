@@ -384,26 +384,6 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
     candidate_urls: list[str] = []
 
     if root_soup is not None:
-        root_published = _extract_published_at_html(root_soup, final_root)
-        root_low = root_text.lower()
-        if (
-            root_published
-            and start <= root_published <= end
-            and any(x in root_low for x in PROMO_HINTS)
-            and any(x in root_low for x in BANKING_HINTS)
-        ):
-            items.append(
-                RawItem(
-                    bank=bank,
-                    source_id=source["id"],
-                    source_type="web",
-                    published_at=root_published,
-                    text=root_text,
-                    url=final_root,
-                    external_links=[],
-                )
-            )
-
         for a in root_soup.select("a[href]"):
             href = a.get("href") or ""
             if not href or href.startswith(("mailto:", "tel:", "javascript:", "#")):
@@ -435,7 +415,17 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
         if not any(x in low for x in BANKING_HINTS):
             continue
 
-        published = _extract_published_at_html(soup, final_url) if soup is not None else _parse_datetime_value(text[:5000])
+        if soup is not None:
+            published = _extract_published_at_html(soup, final_url)
+        else:
+            explicit = re.search(
+                r"(?:Дата публикации|Дата размещения|Опубликовано)\s*[:\-]?\s*"
+                r"(\d{1,2}[./]\d{1,2}[./]20\d{2}|\d{1,2}\s+[а-яё]+\s+20\d{2})",
+                text[:8000],
+                re.IGNORECASE,
+            )
+            published = _parse_datetime_value(explicit.group(1)) if explicit else _parse_datetime_value(final_url)
+
         if not published or not (start <= published <= end):
             continue
 
