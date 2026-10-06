@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -10,11 +11,55 @@ from evaluator import evaluate
 from sources import BANKS
 
 ARTIFACT_DIR = Path("artifacts")
+STATE_PATH = Path("data/state.json")
+
+
+def _normalize(value: str) -> str:
+    return re.sub(r"\W+", " ", (value or "").lower()).strip()
 
 
 def _reward_fingerprint(text: str) -> tuple[str, ...]:
-    values = re.findall(r"\d[\d\s]*(?:%|₽|руб(?:лей|ля|ль|\.)?)", text.lower())
+    values = re.findall(r"\d[\d\s]*(?:%|₽|руб(?:лей|ля|ль|\.)?)", (text or "").lower())
     return tuple(re.sub(r"\s+", "", value) for value in values)
+
+
+def promo_id(item, result) -> str:
+    payload = "|".join([
+        item.bank,
+        _normalize(result.title),
+        str(result.promo_start or ""),
+        str(result.promo_end or ""),
+        result.mechanic or "",
+        ",".join(_reward_fingerprint(result.reward)),
+    ])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
+
+
+def load_state() -> dict:
+    if not STATE_PATH.exists():
+        return {
+            "last_successful_period_start": None,
+            "last_successful_period_end": None,
+            "sent_promos": {},
+        }
+
+    try:
+        data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+
+    data.setdefault("last_successful_period_start", None)
+    data.setdefault("last_successful_period_end", None)
+    data.setdefault("sent_promos", {})
+    return data
+
+
+def save_state(state: dict) -> None:
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STATE_PATH.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 def _duplicate_key(item, result):
@@ -30,8 +75,6 @@ def _duplicate_key(item, result):
 
 
 def _mark_duplicates(evaluated):
-    # Telegram и сайт могут привести к одной и той же акции.
-    # В audit сохраняем оба обнаружения, но в выпуск пропускаем одно.
     seen = {}
     for item, result in evaluated:
         key = _duplicate_key(item, result)
@@ -44,9 +87,6 @@ def _mark_duplicates(evaluated):
 
         first_item, first_result = seen[key]
 
-        # При равных данных предпочитаем карточку из Telegram:
-        # обычно там чище название, а условия уже могут быть верифицированы
-        # через официальный сайт по внешней ссылке.
         if first_item.source_type == "web" and item.source_type == "telegram":
             first_result.included = False
             first_result.reason = "duplicate"
@@ -57,10 +97,71 @@ def _mark_duplicates(evaluated):
 
 
 def run_pipeline():
-    start, end, raw_items, source_checks = collect_previous_week()
+    start, end, raw_items, source_checks = collect_previous_week(recovery_days=7)
     evaluated = [(item, evaluate(item)) for item in raw_items]
     _mark_duplicates(evaluated)
-    return start, end, evaluated, source_checks
+
+    state = load_state()
+    last_start = state.get("last_successful_period_start")
+    last_end = state.get("last_successful_period_end")
+    sent = state.get("sent_promos", {})
+
+    publish_items = []
+    recovered_items = []
+
+    for item, result in evaluated:
+        if not result.included:
+            continue
+
+        pid = promo_id(item, result)
+        if pid in sent:
+            result.included = False
+            result.reason = "already_published"
+            continue
+
+        publication_day = item.published_at.date()
+
+        if start.date() <= publication_day <= end.date():
+            publish_items.append((item, result, pid, False))
+            continue
+
+        # Backfill включаем только если у нас есть зафиксированный прошлый
+        # успешный выпуск и найденная акция относится именно к его периоду.
+        if last_start and last_end:
+            try:
+                from datetime import date
+                previous_start = date.fromisoformat(last_start)
+                previous_end = date.fromisoformat(last_end)
+            except ValueError:
+                previous_start = previous_end = None
+
+            if previous_start and previous_end and previous_start <= publication_day <= previous_end:
+                recovered_items.append((item, result, pid, True))
+                continue
+
+        result.included = False
+        result.reason = "outside_current_or_recovery_period"
+
+    return start, end, evaluated, source_checks, publish_items, recovered_items, state
+
+
+def update_state_after_publish(state: dict, start, end, published_items) -> dict:
+    sent = state.setdefault("sent_promos", {})
+
+    for item, result, pid, recovered in published_items:
+        sent[pid] = {
+            "bank": item.bank,
+            "title": result.title,
+            "publication_date": item.published_at.date().isoformat(),
+            "promo_start": result.promo_start.isoformat() if result.promo_start else None,
+            "promo_end": result.promo_end.isoformat() if result.promo_end else None,
+            "source_url": result.evidence_url or item.url,
+            "recovered": recovered,
+        }
+
+    state["last_successful_period_start"] = start.date().isoformat()
+    state["last_successful_period_end"] = end.date().isoformat()
+    return state
 
 
 def write_audit(start, end, evaluated, source_checks):
