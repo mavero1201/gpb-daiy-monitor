@@ -7,7 +7,10 @@ from urllib.parse import urlparse
 import re
 
 import requests
+import urllib3
 from bs4 import BeautifulSoup
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from collector import RawItem, clean_text
 
@@ -75,12 +78,15 @@ def is_external_link(url: str) -> bool:
 
 def fetch_page_text(url: str) -> str:
     try:
-        response = requests.get(
-            url,
-            timeout=20,
-            headers={"User-Agent": "Mozilla/5.0 GPB-Daily-Monitor/2.1"},
-            allow_redirects=True,
-        )
+        kwargs = {
+            "timeout": 20,
+            "headers": {"User-Agent": "Mozilla/5.0 GPB-Daily-Monitor/3.1"},
+            "allow_redirects": True,
+        }
+        try:
+            response = requests.get(url, **kwargs)
+        except requests.exceptions.SSLError:
+            response = requests.get(url, verify=False, **kwargs)
         response.raise_for_status()
         if "text/html" not in response.headers.get("content-type", "").lower():
             return ""
