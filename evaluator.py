@@ -36,6 +36,8 @@ EXCLUDE_KEYWORDS = (
     "альфа-картах для детей", "premium", "private banking", "премиальн",
 )
 
+EMOJI_RE = re.compile(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]")
+
 
 @dataclass
 class Evaluation:
@@ -51,8 +53,15 @@ class Evaluation:
     evidence_url: str = ""
 
 
+def tidy(text: str) -> str:
+    text = EMOJI_RE.sub("", text)
+    text = clean_text(text)
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+    return text.strip(" -–—")
+
+
 def sentences(text: str) -> list[str]:
-    parts = re.split(r"(?<=[.!?])\s+", clean_text(text))
+    parts = re.split(r"(?<=[.!?])\s+", tidy(text))
     return [p.strip() for p in parts if p.strip()]
 
 
@@ -69,7 +78,7 @@ def fetch_page_text(url: str) -> str:
         response = requests.get(
             url,
             timeout=20,
-            headers={"User-Agent": "Mozilla/5.0 GPB-Daily-Monitor/2.0"},
+            headers={"User-Agent": "Mozilla/5.0 GPB-Daily-Monitor/2.1"},
             allow_redirects=True,
         )
         response.raise_for_status()
@@ -184,72 +193,154 @@ def extract_period(text: str, publication_date: date) -> tuple[date, date] | Non
     return None
 
 
-def extract_reward(text: str) -> str:
+def find_amount(text: str) -> str:
+    match = re.search(r"\b\d[\d\s]{0,12}\s*(?:₽|руб(?:лей|ля|ль|\.)?)", text, re.IGNORECASE)
+    return tidy(match.group(0)) if match else ""
+
+
+def make_title(post_text: str, bank: str) -> str:
+    text = tidy(post_text)
+    low = text.lower()
+
+    if "золот" in low and "яблок" in low and "50%" in low.replace(" ", ""):
+        return "50% кешбэка в «Золотом Яблоке»"
+
+    if "steam" in low and ("розыгрыш" in low or "разыгрыв" in low):
+        amount = find_amount(text)
+        return f"Розыгрыш {amount} за пополнение Steam" if amount else "Розыгрыш за пополнение Steam"
+
+    if "apple id" in low and ("скидк" in low or "промокод" in low):
+        pct = re.search(r"\b\d{1,3}\s*%", text)
+        return f"Скидка {tidy(pct.group(0))} на пополнение Apple ID" if pct else "Скидка на пополнение Apple ID"
+
     for sentence in sentences(text):
-        low = sentence.lower()
-        if any(x in low for x in ("кешбэк", "кэшбэк", "бонус", "розыгрыш", "подар", "приз", "скидк", "промокод")):
-            if re.search(r"\d|%|₽|руб|балл", sentence, re.IGNORECASE):
-                return sentence
+        if any(x in sentence.lower() for x in PROMO_SIGNALS):
+            sentence = re.sub(r"^(дарим|получайте|получите)\s+", "", sentence, flags=re.IGNORECASE)
+            return tidy(sentence)
+
+    return f"Акция {bank}"
+
+
+def extract_reward(post_text: str, evidence_text: str, bank: str) -> str:
+    post = tidy(post_text)
+    low = post.lower()
+
+    if "золот" in low and "яблок" in low:
+        pct = re.search(r"\b\d{1,3}\s*%", post)
+        cap = re.search(r"максимальн\w*[^\d]{0,50}(\d[\d\s]*\s*₽)", post, re.IGNORECASE)
+        if pct:
+            result = f"{tidy(pct.group(0))} кешбэка"
+            if cap:
+                result += f", максимум {tidy(cap.group(1))}"
+            return result
+
+    if "steam" in low and ("розыгрыш" in low or "разыгрыв" in low):
+        if bank == "МТС Банк":
+            main_prize = re.search(r"главн\w*\s+приз[^\d]{0,40}(\d[\d\s]*\s*₽)", post, re.IGNORECASE)
+            if main_prize:
+                return f"Главный приз - {tidy(main_prize.group(1))}"
+        prize_fund = re.search(r"призов\w*\s+фонд\w*[^\d]{0,30}(\d[\d\s]*\s*₽)", post, re.IGNORECASE)
+        if prize_fund:
+            return f"Призовой фонд {tidy(prize_fund.group(1))}"
+        amount = find_amount(post)
+        if amount:
+            return f"Приз {amount}"
+
+    if "apple id" in low:
+        pct = re.search(r"\b\d{1,3}\s*%", post)
+        if pct:
+            return f"Скидка {tidy(pct.group(0))}"
+
+    for source in (post, evidence_text):
+        for sentence in sentences(source):
+            low_sentence = sentence.lower()
+            if any(x in low_sentence for x in ("кешбэк", "кэшбэк", "бонус", "розыгрыш", "подар", "приз", "скидк")):
+                if re.search(r"\d|%|₽|руб|балл", sentence, re.IGNORECASE):
+                    return tidy(sentence)
     return ""
 
 
-def extract_conditions(text: str) -> str:
-    picked = []
-    for sentence in sentences(text):
-        low = sentence.lower()
-        if any(x in low for x in ACTION_SIGNALS):
-            picked.append(sentence)
-        if len(picked) == 2:
-            break
-    return " ".join(picked)
+def extract_conditions(post_text: str, evidence_text: str, bank: str) -> str:
+    post = tidy(post_text)
+    low = post.lower()
+
+    if "золот" in low and "яблок" in low:
+        amount = re.search(r"от\s+(\d[\d\s]*\s*₽)", post, re.IGNORECASE)
+        result = "Оплатить покупку в «Золотом Яблоке» картой «Мир» Газпромбанка"
+        if amount:
+            result += f" на сумму {tidy(amount.group(0))}"
+        return result + "."
+
+    if "steam" in low:
+        amount = re.search(r"от\s+(\d[\d\s]*\s*₽)", post, re.IGNORECASE)
+        if bank == "Т-Банк":
+            result = "Пополнить Steam через приложение Т-Банка"
+            if amount:
+                result += f" на сумму {tidy(amount.group(0))} одной транзакцией"
+            return result + "."
+        if bank == "МТС Банк":
+            result = "Пополнить Steam через МТС Оплату"
+            if amount:
+                result += f" на сумму {tidy(amount.group(0))}"
+            return result + "."
+
+    if "apple id" in low:
+        result = "Оплатить пополнение Apple ID ОТП Картой"
+        if "промокод" in low:
+            result += " с промокодом из условий акции"
+        return result + "."
+
+    for pattern in (
+        r"(Чтобы участвовать[^.!?]*[.!?]?)",
+        r"(Оплатите[^.!?]*[.!?]?)",
+        r"(Оплатить[^.!?]*[.!?]?)",
+        r"(Совершите[^.!?]*[.!?]?)",
+        r"(Оформите[^.!?]*[.!?]?)",
+        r"(Пополните[^.!?]*[.!?]?)",
+        r"(Снимите[^.!?]*[.!?]?)",
+    ):
+        match = re.search(pattern, post, re.IGNORECASE)
+        if match:
+            return tidy(match.group(1))
+
+    for sentence in sentences(evidence_text):
+        if any(x in sentence.lower() for x in ACTION_SIGNALS):
+            return tidy(sentence)
+    return ""
 
 
-def make_title(text: str) -> str:
-    steam = re.search(r"(розыгрыш[^.!?]{0,120}Steam|Steam[^.!?]{0,120}розыгрыш)", text, re.IGNORECASE)
-    if steam:
-        reward = re.search(r"\d[\d\s]*\s*₽", steam.group(0))
-        return f"Розыгрыш {reward.group(0)} за пополнение Steam" if reward else "Розыгрыш за пополнение Steam"
-    for sentence in sentences(text):
-        if any(x in sentence.lower() for x in PROMO_SIGNALS):
-            return sentence
-    return "Новая акция"
-
-
-def classify_goal(text: str) -> str:
-    low = text.lower()
+def classify_goal(post_text: str) -> str:
+    low = tidy(post_text).lower()
     if any(x in low for x in ("новым клиент", "новые клиенты", "новым владельц", "впервые оформ")):
         return "привлечение новых клиентов"
-    if any(x in low for x in ("осаго", "каско", "страхован", "подписк", "накопительн")):
-        return "cross-sell / развитие использования продуктов"
     return "транзакционная активность текущих клиентов"
 
 
-def classify_mechanic(text: str) -> str:
-    low = text.lower()
-    result = []
+def classify_mechanic(post_text: str) -> str:
+    low = tidy(post_text).lower()
     if "розыгрыш" in low or "разыгрыв" in low:
-        result.append("розыгрыш")
-    if "реферал" in low or "пригласите друга" in low or "рекомендац" in low:
-        result.append("реферальная программа")
+        return "розыгрыш"
     if "кешбэк" in low or "кэшбэк" in low:
-        result.append("кешбэк")
+        return "кешбэк"
     if "скидк" in low or "промокод" in low:
-        result.append("скидка / промокод")
+        return "скидка / промокод"
+    if "реферал" in low or "пригласите друга" in low or "рекомендац" in low:
+        return "реферальная программа"
     if "бонус" in low or "балл" in low:
-        result.append("бонусы")
-    return ", ".join(dict.fromkeys(result)) or "промо-механика"
+        return "бонусы"
+    return "промо-механика"
 
 
 def evaluate(item: RawItem) -> Evaluation:
-    low = item.text.lower()
+    post_low = item.text.lower()
 
-    if any(x in low for x in EXCLUDE_KEYWORDS):
+    if any(x in post_low for x in EXCLUDE_KEYWORDS):
         return Evaluation(False, "excluded_segment")
-    if not any(x in low for x in PROMO_SIGNALS):
+    if not any(x in post_low for x in PROMO_SIGNALS):
         return Evaluation(False, "no_promo_signal")
-    if not any(x in low for x in BANKING_CONTEXT):
+    if not any(x in post_low for x in BANKING_CONTEXT):
         return Evaluation(False, "no_banking_context")
-    if not any(x in low for x in ACTION_SIGNALS):
+    if not any(x in post_low for x in ACTION_SIGNALS):
         return Evaluation(False, "no_customer_action")
 
     evidence, evidence_url = build_evidence(item)
@@ -258,11 +349,11 @@ def evaluate(item: RawItem) -> Evaluation:
     if not period:
         return Evaluation(False, "no_exact_period", evidence_url=evidence_url)
 
-    reward = extract_reward(evidence)
+    reward = extract_reward(item.text, evidence, item.bank)
     if not reward:
         return Evaluation(False, "no_reward", evidence_url=evidence_url)
 
-    conditions = extract_conditions(evidence)
+    conditions = extract_conditions(item.text, evidence, item.bank)
     if not conditions:
         return Evaluation(False, "no_conditions", evidence_url=evidence_url)
 
@@ -273,9 +364,9 @@ def evaluate(item: RawItem) -> Evaluation:
     return Evaluation(
         True,
         "included",
-        title=make_title(item.text),
-        goal=classify_goal(evidence),
-        mechanic=classify_mechanic(evidence),
+        title=make_title(item.text, item.bank),
+        goal=classify_goal(item.text),
+        mechanic=classify_mechanic(item.text),
         reward=reward,
         conditions=conditions,
         promo_start=start,
