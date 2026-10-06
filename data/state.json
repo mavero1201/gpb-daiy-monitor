@@ -1,0 +1,42 @@
+{
+  "last_successful_period_start": "2026-09-28",
+  "last_successful_period_end": "2026-10-04",
+  "sent_promos": {
+    "ddd0b6285c935b7ec707ea74": {
+      "bank": "Газпромбанк",
+      "title": "50% кешбэка в «Золотом Яблоке»",
+      "publication_date": "2026-10-02",
+      "promo_start": "2026-10-01",
+      "promo_end": "2026-10-31",
+      "source_url": "https://max.ru/Gazprombank",
+      "recovered": false
+    },
+    "c68e33d8c5ae516b5a4c557e": {
+      "bank": "Т-Банк",
+      "title": "Розыгрыш 1 000 000 ₽ за пополнение Steam",
+      "publication_date": "2026-10-01",
+      "promo_start": "2026-10-01",
+      "promo_end": "2026-10-08",
+      "source_url": "https://2w.ru/transfers.games",
+      "recovered": false
+    },
+    "2e529a32bf0bd5b8f3c9f16d": {
+      "bank": "МТС Банк",
+      "title": "Розыгрыш 50 000 ₽ за пополнение Steam",
+      "publication_date": "2026-09-29",
+      "promo_start": "2026-09-29",
+      "promo_end": "2026-10-08",
+      "source_url": "https://max.ru/mts_bank_official",
+      "recovered": false
+    },
+    "d0feea0e3264e17dd30f7a58": {
+      "bank": "ОТП Банк",
+      "title": "Скидка 10% на пополнение Apple ID",
+      "publication_date": "2026-09-28",
+      "promo_start": "2026-09-28",
+      "promo_end": "2026-10-04",
+      "source_url": "https://max.ru/otpbanknews",
+      "recovered": false
+    }
+  }
+}
