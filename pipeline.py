@@ -44,13 +44,14 @@ def write_audit(start, end, evaluated, source_checks):
     source_path = ARTIFACT_DIR / f"audit_sources_{period_key}.csv"
     with source_path.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.writer(f, delimiter=";")
-        writer.writerow(["bank", "source_id", "type", "value", "status", "item_count", "error"])
+        writer.writerow(["bank", "source_id", "type", "value", "required", "status", "item_count", "error"])
         for check in source_checks:
             writer.writerow([
                 check.bank,
                 check.source_id,
                 check.source_type,
                 check.source_value,
+                check.required,
                 check.status,
                 check.item_count,
                 check.error,
@@ -68,6 +69,7 @@ def write_audit(start, end, evaluated, source_checks):
                 {
                     "id": c.source_id,
                     "type": c.source_type,
+                    "required": c.required,
                     "status": c.status,
                     "item_count": c.item_count,
                     "error": c.error,
