@@ -10,6 +10,9 @@ concurrency:
   group: weekly-daily-banking-monitor
   cancel-in-progress: false
 
+permissions:
+  contents: write
+
 jobs:
   monitor:
     runs-on: ubuntu-latest
@@ -35,6 +38,19 @@ jobs:
           TELEGRAM_CHAT_ID: "-1004291568481"
           STRICT_SOURCES: "1"
         run: python preview.py
+
+      - name: Persist publication state
+        if: success()
+        run: |
+          if [ -f data/state.json ]; then
+            git config user.name "gpb-daily-monitor"
+            git config user.email "actions@users.noreply.github.com"
+            git add data/state.json
+            if ! git diff --cached --quiet; then
+              git commit -m "Update monitor publication state"
+              git push
+            fi
+          fi
 
       - name: Upload audit journal
         if: always()
