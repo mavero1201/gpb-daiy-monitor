@@ -10,8 +10,11 @@ import json
 import re
 
 import requests
+import urllib3
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from sources import BANK_SOURCES
 
@@ -329,13 +332,23 @@ def _pdf_text(content: bytes) -> str:
         return ""
 
 
+def _http_get(url: str):
+    kwargs = {
+        "timeout": 30,
+        "headers": {"User-Agent": "Mozilla/5.0 GPB-Daily-Monitor/3.1"},
+        "allow_redirects": True,
+    }
+    try:
+        return requests.get(url, **kwargs)
+    except requests.exceptions.SSLError:
+        # Часть российских банков использует цепочки сертификатов,
+        # которые GitHub-hosted runner не доверяет. Повторяем запрос без
+        # проверки TLS только для публичных страниц из фиксированного реестра.
+        return requests.get(url, verify=False, **kwargs)
+
+
 def _fetch_document(url: str) -> tuple[str, BeautifulSoup | None, str]:
-    response = requests.get(
-        url,
-        timeout=30,
-        headers={"User-Agent": "Mozilla/5.0 GPB-Daily-Monitor/3.0"},
-        allow_redirects=True,
-    )
+    response = _http_get(url)
     response.raise_for_status()
     final_url = response.url
     content_type = response.headers.get("content-type", "").lower()
