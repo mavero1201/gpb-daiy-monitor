@@ -27,7 +27,7 @@ def main() -> None:
     strict_sources = os.getenv("STRICT_SOURCES") == "1"
     incomplete_required_sources = [
         check for check in source_checks
-        if check.status != "ok"
+        if check.required and check.status != "ok"
     ]
     if strict_sources and incomplete_required_sources:
         details = ", ".join(
