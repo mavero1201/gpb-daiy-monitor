@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from collector import RawItem, clean_text
+from sources import official_link_priority
 
 MONTHS = {
     "января": 1, "февраля": 2, "марта": 3, "апреля": 4,
@@ -114,9 +115,13 @@ def build_evidence(item: RawItem) -> tuple[str, str]:
     parts = [item.text]
     evidence_url = item.url
     checked = 0
-    for link in item.external_links:
-        if not is_external_link(link):
-            continue
+    links = [
+        link for link in item.external_links
+        if is_external_link(link)
+    ]
+    links.sort(key=lambda link: official_link_priority(item.bank, link))
+
+    for link in links:
         page_text = fetch_page_text(link)
         if page_text:
             parts.append(page_text)
