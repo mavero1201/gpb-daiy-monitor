@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+from datetime import timedelta
 
 from collector import collect_previous_week
 from evaluator import evaluate
@@ -102,9 +103,10 @@ def run_pipeline():
     _mark_duplicates(evaluated)
 
     state = load_state()
-    last_start = state.get("last_successful_period_start")
-    last_end = state.get("last_successful_period_end")
     sent = state.get("sent_promos", {})
+    has_publication_history = bool(state.get("last_successful_period_start"))
+    recovery_start = (start - timedelta(days=7)).date()
+    recovery_end = (start - timedelta(days=1)).date()
 
     publish_items = []
     recovered_items = []
@@ -125,19 +127,16 @@ def run_pipeline():
             publish_items.append((item, result, pid, False))
             continue
 
-        # Backfill включаем только если у нас есть зафиксированный прошлый
-        # успешный выпуск и найденная акция относится именно к его периоду.
-        if last_start and last_end:
-            try:
-                from datetime import date
-                previous_start = date.fromisoformat(last_start)
-                previous_end = date.fromisoformat(last_end)
-            except ValueError:
-                previous_start = previous_end = None
-
-            if previous_start and previous_end and previous_start <= publication_day <= previous_end:
-                recovered_items.append((item, result, pid, True))
-                continue
+        # Всегда перепроверяем ровно одну предыдущую календарную неделю,
+        # если у мониторинга уже есть история публикаций. Это позволяет
+        # подхватить акцию, которую прошлый выпуск не смог подтвердить,
+        # даже если после этого уже был опубликован пустой текущий выпуск.
+        if (
+            has_publication_history
+            and recovery_start <= publication_day <= recovery_end
+        ):
+            recovered_items.append((item, result, pid, True))
+            continue
 
         result.included = False
         result.reason = "outside_current_or_recovery_period"
