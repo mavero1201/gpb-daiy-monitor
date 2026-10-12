@@ -54,6 +54,12 @@ EXCLUDE_KEYWORDS = (
     "военная пенсия", "военной пенсии", "военную пенсию", "военных пенсион",
 )
 
+GAMIFICATION_SIGNALS = (
+    "барабан", "колесо фортуны", "крутите колесо", "крути колесо",
+    "вращайте колесо", "дополнительная попытка", "получите попытку",
+    "получи попытку",
+)
+
 RULE_LINK_HINTS = (
     "правил", "услов", "rule", "rules", "terms", "promo", "action",
     "cashback", "bonus", "offer", "document", "docs", ".pdf",
@@ -93,6 +99,17 @@ def has_customer_action(text: str) -> bool:
     if any(signal in low for signal in ACTION_SIGNALS):
         return True
     return any(re.search(pattern, low, re.IGNORECASE) for pattern in ACTION_PATTERNS)
+
+
+def is_gamified_random_mechanic(text: str) -> bool:
+    """Exclude spin/wheel/attempt mechanics with an uncertain immediate outcome.
+
+    Formal prize draws remain a separate promo mechanic in scope according to
+    the existing regression baseline. This guard targets in-app gamification
+    such as "spin the drum/wheel" rather than every probabilistic promotion.
+    """
+    low = tidy(text).lower()
+    return any(signal in low for signal in GAMIFICATION_SIGNALS)
 
 
 def has_monitored_bank_product_link(item: RawItem, evidence_text: str) -> bool:
@@ -496,6 +513,8 @@ def evaluate(item: RawItem) -> Evaluation:
 
     if any(x in post_low for x in EXCLUDE_KEYWORDS):
         return Evaluation(False, "excluded_segment")
+    if is_gamified_random_mechanic(item.text):
+        return Evaluation(False, "gamified_random_mechanic")
     if not any(x in post_low for x in PROMO_SIGNALS):
         return Evaluation(False, "no_promo_signal")
     if not any(x in post_low for x in BANKING_CONTEXT):
