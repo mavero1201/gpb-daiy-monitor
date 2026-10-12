@@ -4,7 +4,9 @@ from html import escape
 import os
 
 from main import send_telegram
+from collector import previous_calendar_week
 from pipeline import (
+    load_state,
     run_pipeline,
     save_state,
     update_state_after_publish,
@@ -28,6 +30,23 @@ def card(item, result, recovered: bool = False) -> str:
 
 
 def main() -> None:
+    # Scheduled backup runs are idempotent: if this weekly period has already
+    # been published successfully, exit before collecting/sending anything.
+    # Manual workflow_dispatch remains force-enabled for diagnostics/recovery.
+    force_run = os.getenv("FORCE_RUN") == "1"
+    if not force_run:
+        check_start, check_end = previous_calendar_week()
+        current_state = load_state()
+        if (
+            current_state.get("last_successful_period_start") == check_start.date().isoformat()
+            and current_state.get("last_successful_period_end") == check_end.date().isoformat()
+        ):
+            print(
+                "Weekly period already published successfully: "
+                f"{check_start:%Y-%m-%d} - {check_end:%Y-%m-%d}. Skip duplicate run."
+            )
+            return
+
     (
         start,
         end,
