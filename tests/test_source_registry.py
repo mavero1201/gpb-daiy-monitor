@@ -29,6 +29,24 @@ class SourceRegistryTest(unittest.TestCase):
                     self.assertFalse(source["automatic"])
                     self.assertFalse(source["required"])
 
+    def test_alfa_web_outage_is_degraded_not_blocking(self):
+        groups = required_any_groups()
+        alfa = [
+            group for group in groups
+            if group["bank"] == "Альфа-Банк"
+            and group["group"] == "alfa_official_web"
+        ]
+        self.assertEqual(1, len(alfa))
+        self.assertFalse(alfa[0]["blocking"])
+
+        checks = [
+            SimpleNamespace(bank="Альфа-Банк", source_id="alfa_tg", required=True, status="ok"),
+            SimpleNamespace(bank="Альфа-Банк", source_id="alfa_web_actions", required=False, status="error"),
+            SimpleNamespace(bank="Альфа-Банк", source_id="alfa_web_debit", required=False, status="error"),
+        ]
+        self.assertEqual([], strict_coverage_failures(checks))
+        self.assertFalse(bank_fully_checked("Альфа-Банк", checks))
+
     def test_yandex_web_sources_form_one_required_fallback_group(self):
         groups = required_any_groups()
         yandex = [
