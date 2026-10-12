@@ -3,7 +3,7 @@ from __future__ import annotations
 from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 import re
 
 import requests
@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-from collector import RawItem, clean_text
+from collector import RawItem, clean_text, _fetch_document
 from sources import official_link_priority
 
 MONTHS = {
@@ -45,6 +45,11 @@ EXCLUDE_KEYWORDS = (
     "альфа-картах для детей", "premium", "private banking", "премиальн",
     # Узкие сегменты вне mass-market Daily Banking.
     "военная пенсия", "военной пенсии", "военную пенсию", "военных пенсион",
+)
+
+RULE_LINK_HINTS = (
+    "правил", "услов", "rule", "rules", "terms", "promo", "action",
+    "cashback", "bonus", "offer", "document", "docs", ".pdf",
 )
 
 EMOJI_RE = re.compile(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]")
@@ -137,6 +142,82 @@ def build_evidence(item: RawItem) -> tuple[str, str]:
         if checked >= 3:
             break
     return clean_text(" ".join(parts)), evidence_url
+
+
+def _rule_link_priority(bank: str, url: str) -> tuple[int, int]:
+    low = (url or "").lower()
+    has_rule_hint = any(hint in low for hint in RULE_LINK_HINTS)
+    return (0 if has_rule_hint else 1, official_link_priority(bank, url))
+
+
+def recheck_exact_period(
+    item: RawItem,
+    base_evidence: str,
+    base_url: str,
+) -> tuple[tuple[date, date] | None, str, str]:
+    """Targeted second pass for promo-like posts without a confirmed full period.
+
+    We follow more external/rules links than the normal evaluator and one nested
+    level of likely rules/documents. A promo remains excluded unless an exact
+    start and end date are found in the official evidence.
+    """
+    queue = [
+        link for link in item.external_links
+        if is_external_link(link)
+    ]
+    queue = sorted(dict.fromkeys(queue), key=lambda url: _rule_link_priority(item.bank, url))
+
+    seen: set[str] = set()
+    checked = 0
+    evidence = base_evidence
+    evidence_url = base_url
+
+    while queue and checked < 8:
+        url = queue.pop(0)
+        if url in seen:
+            continue
+        seen.add(url)
+
+        try:
+            page_text, soup, final_url = _fetch_document(url)
+        except Exception:
+            continue
+
+        checked += 1
+        if page_text:
+            combined = clean_text(f"{evidence} {page_text}")
+            period = extract_period(combined, item.published_at.date())
+            if period:
+                return period, combined, final_url or url
+            evidence = combined
+            evidence_url = final_url or url
+
+        nested_links: list[str] = []
+        if soup is not None:
+            for tag in soup.select("a[href]"):
+                href = tag.get("href") or ""
+                if not href:
+                    continue
+                nested_links.append(urljoin(final_url or url, href))
+        elif page_text:
+            nested_links.extend(
+                href.rstrip(".,;")
+                for _, href in re.findall(
+                    r"\[([^\]]*)\]\((https?://[^)\s]+)\)",
+                    page_text,
+                )
+            )
+
+        for link in nested_links:
+            if not is_external_link(link) or link in seen or link in queue:
+                continue
+            low = link.lower()
+            if any(hint in low for hint in RULE_LINK_HINTS):
+                queue.append(link)
+
+        queue.sort(key=lambda link: _rule_link_priority(item.bank, link))
+
+    return None, evidence, evidence_url
 
 
 def parse_numeric_date(day: str, month: str, year: str) -> date | None:
@@ -376,8 +457,29 @@ def evaluate(item: RawItem) -> Evaluation:
     evidence, evidence_url = build_evidence(item)
 
     period = extract_period(evidence, item.published_at.date())
+
+    # Однодневная акция с формулировкой "сегодня/только сегодня" имеет
+    # однозначный срок, так как дата публикации известна.
+    if not period and re.search(
+        r"\b(?:только\s+)?сегодня\b|\bдо\s+конца\s+дня\b",
+        item.text,
+        re.IGNORECASE,
+    ):
+        period = (item.published_at.date(), item.published_at.date())
+
     if not period:
-        return Evaluation(False, "no_exact_period", evidence_url=evidence_url)
+        period, evidence, evidence_url = recheck_exact_period(
+            item,
+            evidence,
+            evidence_url,
+        )
+
+    if not period:
+        return Evaluation(
+            False,
+            "no_exact_period_after_recheck",
+            evidence_url=evidence_url,
+        )
 
     reward = extract_reward(item.text, evidence, item.bank)
     if not reward:
