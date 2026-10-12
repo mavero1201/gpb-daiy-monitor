@@ -74,9 +74,9 @@ SOURCE_REGISTRY = [
         "sources": [
             {"id": "yandex_tg", "type": "telegram", "value": "yandexfintech", "url": "https://t.me/yandexfintech", "role": "official_yandex_pay_channel", "required": True, "automatic": True},
             {"id": "yandex_max_unconfirmed", "type": "max", "value": "", "url": "", "role": "no_dedicated_content_channel_confirmed", "required": False, "automatic": False},
-            {"id": "yandex_web_account", "type": "web", "value": "https://yabank.yandex.ru/account", "url": "https://yabank.yandex.ru/account", "role": "account", "required": True, "automatic": True},
-            {"id": "yandex_web_pay", "type": "web", "value": "https://pay.yandex.ru/", "url": "https://pay.yandex.ru/", "role": "pay", "required": False, "automatic": True},
-            {"id": "yandex_web_cashback", "type": "web", "value": "https://yandex.ru/support/pay/ru/cashback", "url": "https://yandex.ru/support/pay/ru/cashback", "role": "cashback_rules", "required": False, "automatic": True},
+            {"id": "yandex_web_account", "type": "web", "value": "https://yabank.yandex.ru/account", "url": "https://yabank.yandex.ru/account", "role": "account", "required": False, "required_any_group": "yandex_official_web", "automatic": True},
+            {"id": "yandex_web_pay", "type": "web", "value": "https://pay.yandex.ru/", "url": "https://pay.yandex.ru/", "role": "pay", "required": False, "required_any_group": "yandex_official_web", "automatic": True},
+            {"id": "yandex_web_cashback", "type": "web", "value": "https://yandex.ru/support/pay/ru/cashback", "url": "https://yandex.ru/support/pay/ru/cashback", "role": "cashback_rules", "required": False, "required_any_group": "yandex_official_web", "automatic": True},
         ],
     },
     {
@@ -137,6 +137,7 @@ def _automatic_sources(entry: dict) -> list[dict]:
                 "type": source["type"],
                 "value": source["value"],
                 "required": source.get("required", False),
+                "required_any_group": source.get("required_any_group"),
             }
         )
     return result
@@ -182,3 +183,67 @@ def official_link_priority(bank: str, url: str) -> int:
     # Other links are still allowed because banks often use redirectors
     # (clck.ru, appmetrica, short links) to reach official rules.
     return 5
+
+
+def required_any_groups() -> list[dict]:
+    groups: dict[tuple[str, str], list[str]] = {}
+    for entry in SOURCE_REGISTRY:
+        bank = entry["bank"]
+        for source in entry["sources"]:
+            group = source.get("required_any_group")
+            if not group or not source.get("automatic"):
+                continue
+            groups.setdefault((bank, group), []).append(source["id"])
+
+    return [
+        {"bank": bank, "group": group, "source_ids": source_ids}
+        for (bank, group), source_ids in groups.items()
+    ]
+
+
+def strict_coverage_failures(source_checks) -> list[str]:
+    failures = [
+        f"{check.bank}:{check.source_id}:{check.status}"
+        for check in source_checks
+        if check.required and check.status != "ok"
+    ]
+
+    checks_by_key = {
+        (check.bank, check.source_id): check
+        for check in source_checks
+    }
+
+    for group in required_any_groups():
+        statuses = [
+            checks_by_key[(group["bank"], source_id)].status
+            for source_id in group["source_ids"]
+            if (group["bank"], source_id) in checks_by_key
+        ]
+        if not statuses or not any(status == "ok" for status in statuses):
+            failures.append(
+                f'{group["bank"]}:{group["group"]}:all_unavailable'
+            )
+
+    return failures
+
+
+def bank_fully_checked(bank: str, source_checks) -> bool:
+    bank_checks = [check for check in source_checks if check.bank == bank]
+    required_checks = [check for check in bank_checks if check.required]
+
+    if required_checks and not all(check.status == "ok" for check in required_checks):
+        return False
+
+    groups = [group for group in required_any_groups() if group["bank"] == bank]
+    by_id = {check.source_id: check for check in bank_checks}
+
+    for group in groups:
+        statuses = [
+            by_id[source_id].status
+            for source_id in group["source_ids"]
+            if source_id in by_id
+        ]
+        if not statuses or not any(status == "ok" for status in statuses):
+            return False
+
+    return bool(required_checks or groups)
