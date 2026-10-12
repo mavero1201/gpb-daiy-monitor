@@ -43,6 +43,12 @@ class SourceRegistryTest(unittest.TestCase):
             SimpleNamespace(bank="Альфа-Банк", source_id="alfa_tg", required=True, status="ok"),
             SimpleNamespace(bank="Альфа-Банк", source_id="alfa_web_actions", required=False, status="error"),
             SimpleNamespace(bank="Альфа-Банк", source_id="alfa_web_debit", required=False, status="error"),
+            # strict_coverage_failures validates all blocking groups globally;
+            # include a healthy Yandex fallback group so this test isolates Alfa.
+            SimpleNamespace(bank="Яндекс Банк", source_id="yandex_tg", required=True, status="ok"),
+            SimpleNamespace(bank="Яндекс Банк", source_id="yandex_web_account", required=False, status="error"),
+            SimpleNamespace(bank="Яндекс Банк", source_id="yandex_web_pay", required=False, status="ok"),
+            SimpleNamespace(bank="Яндекс Банк", source_id="yandex_web_cashback", required=False, status="ok"),
         ]
         self.assertEqual([], strict_coverage_failures(checks))
         self.assertFalse(bank_fully_checked("Альфа-Банк", checks))
