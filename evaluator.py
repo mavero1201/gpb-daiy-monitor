@@ -34,6 +34,13 @@ ACTION_SIGNALS = (
     "попол", "снимайт", "снять", "перевед", "подключ", "активир",
     "откро",
 )
+
+ACTION_PATTERNS = (
+    r"\b(?:зайдите|заходите)\s+в\s+(?:мобильное\s+)?(?:приложение|интернет-банк)",
+    r"\bзарегистриру\w*\s+(?:в|на)\s+(?:акци\w*|программ\w*)",
+    r"\bвыберите\s+(?:категори\w*|предложени\w*|кешбэк\w*|кэшбэк\w*)",
+    r"\bиспользуйте\s+промокод",
+)
 BANKING_CONTEXT = (
     "карт", "дебетов", "счет", "счёт", "платеж", "оплат", "покуп",
     "перевод", "попол", "сняти", "банкомат", "кешбэк", "кэшбэк",
@@ -79,6 +86,13 @@ def tidy(text: str) -> str:
 def sentences(text: str) -> list[str]:
     parts = re.split(r"(?<=[.!?])\s+", tidy(text))
     return [p.strip() for p in parts if p.strip()]
+
+
+def has_customer_action(text: str) -> bool:
+    low = tidy(text).lower()
+    if any(signal in low for signal in ACTION_SIGNALS):
+        return True
+    return any(re.search(pattern, low, re.IGNORECASE) for pattern in ACTION_PATTERNS)
 
 
 def is_external_link(url: str) -> bool:
@@ -409,13 +423,19 @@ def extract_conditions(post_text: str, evidence_text: str, bank: str) -> str:
         r"(Оформите[^.!?]*[.!?]?)",
         r"(Пополните[^.!?]*[.!?]?)",
         r"(Снимите[^.!?]*[.!?]?)",
+        r"(Активируйте[^.!?]*[.!?]?)",
+        r"(Зарегистрируйтесь[^.!?]*[.!?]?)",
+        r"(Зайдите[^.!?]*[.!?]?)",
+        r"(Заходите[^.!?]*[.!?]?)",
+        r"(Выберите[^.!?]*[.!?]?)",
+        r"(Используйте\s+промокод[^.!?]*[.!?]?)",
     ):
         match = re.search(pattern, post, re.IGNORECASE)
         if match:
             return tidy(match.group(1))
 
     for sentence in sentences(evidence_text):
-        if any(x in sentence.lower() for x in ACTION_SIGNALS):
+        if has_customer_action(sentence):
             return tidy(sentence)
     return ""
 
@@ -451,7 +471,7 @@ def evaluate(item: RawItem) -> Evaluation:
         return Evaluation(False, "no_promo_signal")
     if not any(x in post_low for x in BANKING_CONTEXT):
         return Evaluation(False, "no_banking_context")
-    if not any(x in post_low for x in ACTION_SIGNALS):
+    if not has_customer_action(item.text):
         return Evaluation(False, "no_customer_action")
 
     evidence, evidence_url = build_evidence(item)
