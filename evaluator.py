@@ -95,6 +95,35 @@ def has_customer_action(text: str) -> bool:
     return any(re.search(pattern, low, re.IGNORECASE) for pattern in ACTION_PATTERNS)
 
 
+def has_monitored_bank_product_link(item: RawItem, evidence_text: str) -> bool:
+    post = tidy(item.text).lower()
+    evidence = tidy(evidence_text).lower()
+
+    # Публикация в канале банка сама по себе не означает, что акция
+    # стимулирует использование продукта этого банка.
+    if item.bank == "МТС Банк" and "мтс оплат" in post:
+        phrases = (
+            "картой мтс банка",
+            "карта мтс банка",
+            "карты мтс банка",
+            "карте мтс банка",
+            "мтс деньги",
+            "mts cashback",
+            "счет мтс банка",
+            "счёт мтс банка",
+            "приложении мтс банка",
+            "приложение мтс банка",
+            "интернет-банк мтс банка",
+            "клиент мтс банка",
+            "клиенты мтс банка",
+            "держателям карт мтс",
+            "держатели карт мтс",
+        )
+        return any(value in post or value in evidence for value in phrases)
+
+    return True
+
+
 def is_external_link(url: str) -> bool:
     try:
         host = urlparse(url).netloc.lower()
@@ -475,6 +504,13 @@ def evaluate(item: RawItem) -> Evaluation:
         return Evaluation(False, "no_customer_action")
 
     evidence, evidence_url = build_evidence(item)
+
+    if not has_monitored_bank_product_link(item, evidence):
+        return Evaluation(
+            False,
+            "ecosystem_service_not_bank_product",
+            evidence_url=evidence_url,
+        )
 
     period = extract_period(evidence, item.published_at.date())
 
