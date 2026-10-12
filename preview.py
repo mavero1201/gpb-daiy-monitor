@@ -12,7 +12,7 @@ from pipeline import (
     update_state_after_publish,
     write_audit,
 )
-from sources import BANKS
+from sources import BANKS, bank_fully_checked, strict_coverage_failures
 
 
 def card(item, result, recovered: bool = False) -> str:
@@ -60,18 +60,11 @@ def main() -> None:
     write_audit(start, end, evaluated, source_checks)
 
     strict_sources = os.getenv("STRICT_SOURCES") == "1"
-    incomplete_required_sources = [
-        check for check in source_checks
-        if check.required and check.status != "ok"
-    ]
-    if strict_sources and incomplete_required_sources:
-        details = ", ".join(
-            f"{check.bank}:{check.source_id}:{check.status}"
-            for check in incomplete_required_sources
-        )
+    coverage_failures = strict_coverage_failures(source_checks)
+    if strict_sources and coverage_failures:
         raise RuntimeError(
-            "Automatic publication stopped because required sources were not fully checked: "
-            + details
+            "Automatic publication stopped because required source coverage failed: "
+            + ", ".join(coverage_failures)
         )
 
     included_by_bank = {bank: [] for bank in BANKS}
@@ -93,12 +86,10 @@ def main() -> None:
         bank_block.extend(cards)
         blocks.append("\n\n".join(bank_block))
 
-    fully_checked = []
-    for bank in BANKS:
-        checks = [check for check in source_checks if check.bank == bank]
-        required_checks = [check for check in checks if check.required]
-        if required_checks and all(check.status == "ok" for check in required_checks):
-            fully_checked.append(bank)
+    fully_checked = [
+        bank for bank in BANKS
+        if bank_fully_checked(bank, source_checks)
+    ]
 
     no_actions = [
         bank for bank in fully_checked
