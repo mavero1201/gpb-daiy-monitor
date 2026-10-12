@@ -39,8 +39,8 @@ SOURCE_REGISTRY = [
         "sources": [
             {"id": "alfa_tg", "type": "telegram", "value": "alfabank", "url": "https://t.me/alfabank", "role": "official_channel", "required": True, "automatic": True},
             {"id": "alfa_max_bot", "type": "max_bot", "value": "alfabank_bot", "url": "https://max.ru/alfabank_bot", "role": "service_bot_not_content_channel", "required": False, "automatic": False},
-            {"id": "alfa_web_actions", "type": "web", "value": "https://alfabank.ru/actions/rules/", "url": "https://alfabank.ru/actions/rules/", "role": "promotion_rules", "required": True, "automatic": True},
-            {"id": "alfa_web_debit", "type": "web", "value": "https://alfabank.ru/everyday/debit-cards/alfacard/", "url": "https://alfabank.ru/everyday/debit-cards/alfacard/", "role": "debit_card", "required": False, "automatic": True},
+            {"id": "alfa_web_actions", "type": "web", "value": "https://alfabank.ru/actions/rules/", "url": "https://alfabank.ru/actions/rules/", "role": "promotion_rules", "required": False, "required_any_group": "alfa_official_web", "required_any_group_blocking": False, "automatic": True},
+            {"id": "alfa_web_debit", "type": "web", "value": "https://alfabank.ru/everyday/debit-cards/alfacard/", "url": "https://alfabank.ru/everyday/debit-cards/alfacard/", "role": "debit_card", "required": False, "required_any_group": "alfa_official_web", "required_any_group_blocking": False, "automatic": True},
         ],
     },
     {
@@ -138,6 +138,7 @@ def _automatic_sources(entry: dict) -> list[dict]:
                 "value": source["value"],
                 "required": source.get("required", False),
                 "required_any_group": source.get("required_any_group"),
+                "required_any_group_blocking": source.get("required_any_group_blocking", True),
             }
         )
     return result
@@ -186,19 +187,31 @@ def official_link_priority(bank: str, url: str) -> int:
 
 
 def required_any_groups() -> list[dict]:
-    groups: dict[tuple[str, str], list[str]] = {}
+    groups: dict[tuple[str, str], dict] = {}
     for entry in SOURCE_REGISTRY:
         bank = entry["bank"]
         for source in entry["sources"]:
             group = source.get("required_any_group")
             if not group or not source.get("automatic"):
                 continue
-            groups.setdefault((bank, group), []).append(source["id"])
 
-    return [
-        {"bank": bank, "group": group, "source_ids": source_ids}
-        for (bank, group), source_ids in groups.items()
-    ]
+            key = (bank, group)
+            current = groups.setdefault(
+                key,
+                {
+                    "bank": bank,
+                    "group": group,
+                    "source_ids": [],
+                    "blocking": source.get("required_any_group_blocking", True),
+                },
+            )
+            current["source_ids"].append(source["id"])
+            current["blocking"] = (
+                current["blocking"]
+                and source.get("required_any_group_blocking", True)
+            )
+
+    return list(groups.values())
 
 
 def strict_coverage_failures(source_checks) -> list[str]:
@@ -214,6 +227,9 @@ def strict_coverage_failures(source_checks) -> list[str]:
     }
 
     for group in required_any_groups():
+        if not group.get("blocking", True):
+            continue
+
         statuses = [
             checks_by_key[(group["bank"], source_id)].status
             for source_id in group["source_ids"]
