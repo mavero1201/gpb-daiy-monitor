@@ -71,11 +71,11 @@ class RegressionWeekTest(unittest.TestCase):
                 False,
             ),
             (
-                "include_one_day_today",
+                "exclude_mts_barabania",
                 "МТС Банк",
                 "2026-10-08T11:30:00+03:00",
                 "Акция только сегодня. Заходите в приложение или интернет-банк, откройте раздел Выгода и получите дополнительную попытку за 15 баллов кешбэка вместо 30. Акция доступна держателям карты МТС Деньги.",
-                True,
+                False,
             ),
             (
                 "exclude_mts_payment_any_bank",
