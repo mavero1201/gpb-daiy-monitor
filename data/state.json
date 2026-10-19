@@ -1,6 +1,6 @@
 {
-  "last_successful_period_start": "2026-10-05",
-  "last_successful_period_end": "2026-10-11",
+  "last_successful_period_start": "2026-10-12",
+  "last_successful_period_end": "2026-10-18",
   "sent_promos": {
     "ddd0b6285c935b7ec707ea74": {
       "bank": "Газпромбанк",
@@ -37,6 +37,42 @@
       "promo_end": "2026-10-04",
       "source_url": "https://max.ru/otpbanknews",
       "recovered": false
+    },
+    "bb5c66594f294d8ace74e7e4": {
+      "bank": "Газпромбанк",
+      "title": "Внимание, у нас есть кое-что интересное Подписка Газпром Бонус и Х5 запустили акцию «Ваш шанс на миллион»: разыгрываем до 1 000 000 баллов «Х5 Клуба» - и это не считая поощрительных баллов на покупки в \"Перекрестке\" и \"Пятерочке\".",
+      "publication_date": "2026-10-15",
+      "promo_start": "2026-09-18",
+      "promo_end": "2026-12-30",
+      "source_url": "https://site.prod.cdn.gazprombonus.ru/x5rules.pdf",
+      "recovered": false
+    },
+    "00a7fe2eae8547adc8680063": {
+      "bank": "ВТБ",
+      "title": "Этот пост можно обсудить с родителями Если начнёте получать пенсию на карту ВТБ в период акции, по промокоду 13ПЕНСИЯ подарим 1000 ₽.",
+      "publication_date": "2026-10-12",
+      "promo_start": "2026-09-07",
+      "promo_end": "2027-04-30",
+      "source_url": "https://xn--90ab2c.xn--p1ai/media-files/vtb.ru/sitepages/promo/13pensiy/usloviya_akcii.pdf",
+      "recovered": false
+    },
+    "62b5dbbf9a03c3f9651c939e": {
+      "bank": "Ozon Банк",
+      "title": "Скидки до 30% по зелёным ценам на Ozon и оплата заказа после его получения.",
+      "publication_date": "2026-10-12",
+      "promo_start": "2026-10-12",
+      "promo_end": "2026-10-12",
+      "source_url": "https://s.ozon.ru/mUvfYuk",
+      "recovered": false
+    },
+    "dedff04e20fca66c61006ffe": {
+      "bank": "Т-Банк",
+      "title": "Выбирайте свой дизайн, оформляйте карту и участвуйте в розыгрыше эксклюзивного мерча: https://2w.ru/black_slovodna_tg",
+      "publication_date": "2026-10-09",
+      "promo_start": "2026-10-07",
+      "promo_end": "2026-11-07",
+      "source_url": "https://cdn.tbank-online.com/static/documents/promo-win-slovodna-designed-debit-card.pdf",
+      "recovered": true
     }
   }
 }
