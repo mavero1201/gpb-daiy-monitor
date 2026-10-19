@@ -9,6 +9,7 @@ from datetime import timedelta
 
 from collector import collect_previous_week
 from evaluator import evaluate
+from quality import validate_card
 from sources import BANKS
 
 ARTIFACT_DIR = Path("artifacts")
@@ -100,6 +101,11 @@ def _mark_duplicates(evaluated):
 def run_pipeline(republish_current_week: bool = False):
     start, end, raw_items, source_checks = collect_previous_week(recovery_days=7)
     evaluated = [(item, evaluate(item)) for item in raw_items]
+    for item, result in evaluated:
+        reason = validate_card(item, result)
+        if reason:
+            result.included = False
+            result.reason = reason
     _mark_duplicates(evaluated)
 
     state = load_state()
