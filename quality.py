@@ -42,7 +42,7 @@ def validate_card(item, result) -> str | None:
     combined = (title + " " + reward + " " + conditions).lower()
     if any(fragment in combined for fragment in NOISE):
         return "quality_irrelevant_text"
-    if not any(x in reward.lower() for x in REWARD_WORDS) and not re.search(r"\\d+\\s*[%₽]", reward):
+    if not any(x in reward.lower() for x in REWARD_WORDS) and not re.search(r"\d+\s*[%₽]", reward):
         return "quality_unverified_reward"
     if mechanic not in MECHANICS:
         return "quality_unknown_mechanic"
