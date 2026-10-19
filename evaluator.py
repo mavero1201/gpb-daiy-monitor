@@ -513,6 +513,10 @@ def evaluate(item: RawItem) -> Evaluation:
 
     if any(x in post_low for x in EXCLUDE_KEYWORDS):
         return Evaluation(False, "excluded_segment")
+    if item.bank == "Ozon Банк" and "зелён" in post_low and "цен" in post_low and not any(x in post_low for x in ("ozon карт", "озон карт", "картой ozon банка", "картой озон банка")):
+        return Evaluation(False, "marketplace_discount_without_bank_product")
+    if item.bank == "Газпромбанк" and "газпром бонус" in post_low and "х5" in post_low and "шанс на миллион" in post_low:
+        return Evaluation(False, "ecosystem_subscription_promo")
     if is_gamified_random_mechanic(item.text):
         return Evaluation(False, "gamified_random_mechanic")
     if not any(x in post_low for x in PROMO_SIGNALS):
