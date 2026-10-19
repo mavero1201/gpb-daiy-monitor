@@ -133,6 +133,7 @@ def run_pipeline(republish_current_week: bool = False):
         # даже если после этого уже был опубликован пустой текущий выпуск.
         if (
             has_publication_history
+            and not republish_current_week
             and recovery_start <= publication_day <= recovery_end
         ):
             recovered_items.append((item, result, pid, True))
