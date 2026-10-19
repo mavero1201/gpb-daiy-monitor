@@ -2,6 +2,12 @@ name: Weekly Daily Banking monitor
 
 on:
   workflow_dispatch:
+    inputs:
+      republish_week:
+        description: "Повторно опубликовать прошлую календарную неделю (без сброса истории)"
+        type: boolean
+        required: false
+        default: false
   schedule:
     # Primary: 09:07 Moscow = 06:07 UTC.
     # Backup: 10:10 Moscow = 07:10 UTC.
@@ -40,6 +46,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: "-1004291568481"
           STRICT_SOURCES: "1"
+          REPUBLISH_WEEK: ${{ inputs.republish_week && '1' || '0' }}
           FORCE_RUN: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: python preview.py
 
