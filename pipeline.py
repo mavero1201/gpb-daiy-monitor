@@ -97,7 +97,7 @@ def _mark_duplicates(evaluated):
             result.reason = "duplicate"
 
 
-def run_pipeline():
+def run_pipeline(republish_current_week: bool = False):
     start, end, raw_items, source_checks = collect_previous_week(recovery_days=7)
     evaluated = [(item, evaluate(item)) for item in raw_items]
     _mark_duplicates(evaluated)
@@ -116,7 +116,7 @@ def run_pipeline():
             continue
 
         pid = promo_id(item, result)
-        if pid in sent:
+        if pid in sent and not (republish_current_week and start.date() <= item.published_at.date() <= end.date()):
             result.included = False
             result.reason = "already_published"
             continue
