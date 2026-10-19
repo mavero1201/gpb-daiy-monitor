@@ -537,15 +537,8 @@ def evaluate(item: RawItem) -> Evaluation:
 
     period = extract_period(evidence, item.published_at.date())
 
-    # Однодневная акция с формулировкой "сегодня/только сегодня" имеет
-    # однозначный срок, так как дата публикации известна.
-    if not period and re.search(
-        r"\b(?:только\s+)?сегодня\b|\bдо\s+конца\s+дня\b",
-        item.text,
-        re.IGNORECASE,
-    ):
-        period = (item.published_at.date(), item.published_at.date())
-
+    # Never infer the promotion period solely from "today" in a social post.
+    # Exact dates must be present in the source evidence.
     if not period:
         period, evidence, evidence_url = recheck_exact_period(
             item,
