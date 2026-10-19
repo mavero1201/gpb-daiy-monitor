@@ -99,13 +99,13 @@ def main() -> None:
     ]
     if no_actions:
         blocks.append(
-            "<i>Без новых подтверждённых акций за неделю: "
+            "<i>Нет допущенных к публикации предложений за неделю: "
             + ", ".join(escape(bank) for bank in no_actions)
             + ".</i>"
         )
 
     if len(blocks) == 2:
-        blocks.append("Подтверждённых новых акций за неделю не найдено.")
+        blocks.append("Нет предложений, прошедших проверку для публикации.")
 
     full = "\n\n".join(blocks)
 
