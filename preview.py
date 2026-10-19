@@ -33,7 +33,8 @@ def main() -> None:
     # Scheduled backup runs are idempotent: if this weekly period has already
     # been published successfully, exit before collecting/sending anything.
     # Manual workflow_dispatch remains force-enabled for diagnostics/recovery.
-    force_run = os.getenv("FORCE_RUN") == "1"
+    republish = os.getenv("REPUBLISH_WEEK") == "1"
+    force_run = os.getenv("FORCE_RUN") == "1" or republish
     if not force_run:
         check_start, check_end = previous_calendar_week()
         current_state = load_state()
@@ -55,7 +56,7 @@ def main() -> None:
         publish_items,
         recovered_items,
         state,
-    ) = run_pipeline()
+    ) = run_pipeline(republish_current_week=republish)
 
     write_audit(start, end, evaluated, source_checks)
 
