@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from html import escape
 import os
+from pathlib import Path
 
 from main import send_telegram
 from collector import previous_calendar_week
@@ -107,6 +108,14 @@ def main() -> None:
         blocks.append("Подтверждённых новых акций за неделю не найдено.")
 
     full = "\n\n".join(blocks)
+
+    # Always save the exact publication candidate for review.
+    preview_path = Path("artifacts") / f"preview_{start:%Y-%m-%d}_{end:%Y-%m-%d}.html"
+    preview_path.parent.mkdir(parents=True, exist_ok=True)
+    preview_path.write_text(full, encoding="utf-8")
+    if os.getenv("PUBLISH_TO_TELEGRAM") != "1":
+        print(f"PREVIEW ONLY: {preview_path}. No Telegram messages sent; publication state unchanged.")
+        return
 
     if len(full) <= 4000:
         send_telegram(full)
