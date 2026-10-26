@@ -60,6 +60,14 @@ def main() -> None:
     ) = run_pipeline(republish_current_week=republish)
 
     write_audit(start, end, evaluated, source_checks)
+    review_count = sum(1 for _, result in evaluated if result.reason in {
+        "no_exact_period_after_recheck", "quality_unstructured_card",
+        "quality_irrelevant_text", "quality_mechanic_mismatch",
+        "quality_unverified_reward", "quality_unknown_mechanic",
+        "quality_no_bank_product_link", "quality_single_day_requires_review",
+        "quality_missing_required_field", "quality_invalid_source",
+        "no_reward", "no_conditions",
+    })
 
     strict_sources = os.getenv("STRICT_SOURCES") == "1"
     coverage_failures = strict_coverage_failures(source_checks)
@@ -103,6 +111,9 @@ def main() -> None:
             + ", ".join(escape(bank) for bank in no_actions)
             + ".</i>"
         )
+
+    if review_count:
+        blocks.append(f"<i>Требуют дополнительной проверки: {review_count}. См. review_queue в архиве запуска. Это не означает отсутствие акций.</i>")
 
     if len(blocks) == 2:
         blocks.append("Нет предложений, прошедших проверку для публикации.")
