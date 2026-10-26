@@ -202,13 +202,16 @@ def write_audit(start, end, evaluated, source_checks):
         "quality_no_bank_product_link", "quality_single_day_requires_review",
         "quality_missing_required_field", "quality_invalid_source",
         "no_reward", "no_conditions",
+        "deadline_only_needs_start", "activity_month_only_needs_terms",
+        "multiple_offers_require_split",
     }
     review_path = ARTIFACT_DIR / f"review_queue_{period_key}.csv"
     with review_path.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.writer(f, delimiter=";")
         writer.writerow(["bank", "source_id", "published_at", "url", "reason",
                          "title", "reward", "conditions", "mechanic",
-                         "promo_start", "promo_end", "evidence_url", "source_text"])
+                         "promo_start", "promo_end", "date_status",
+                         "date_evidence", "evidence_url", "source_text"])
         for item, result in evaluated:
             if result.reason not in review_reasons:
                 continue
@@ -218,6 +221,7 @@ def write_audit(start, end, evaluated, source_checks):
                 result.conditions, result.mechanic,
                 result.promo_start.isoformat() if result.promo_start else "",
                 result.promo_end.isoformat() if result.promo_end else "",
+                result.date_status, result.date_evidence,
                 result.evidence_url, item.text,
             ])
 
