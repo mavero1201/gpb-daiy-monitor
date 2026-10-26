@@ -56,8 +56,8 @@ class SourceCoherenceTests(unittest.TestCase):
                     datetime(2026, 10, 25, tzinfo=timezone.utc),
                     [(item("Текст исходной акции"), candidate)], [],
                 )
-            queue = next(p for p in paths if "review_queue" in str(p))
-            self.assertIn("Текст исходной акции", queue.read_text(encoding="utf-8-sig"))
+                queue = next(p for p in paths if "review_queue" in str(p))
+                self.assertIn("Текст исходной акции", queue.read_text(encoding="utf-8-sig"))
 
 
 if __name__ == "__main__":
