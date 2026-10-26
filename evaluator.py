@@ -21,6 +21,12 @@ MONTHS = {
     "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
 }
 
+MONTHS_LOCATIVE = {
+    "январе": 1, "феврале": 2, "марте": 3, "апреле": 4,
+    "мае": 5, "июне": 6, "июле": 7, "августе": 8,
+    "сентябре": 9, "октябре": 10, "ноябре": 11, "декабре": 12,
+}
+
 PROMO_SIGNALS = (
     "акци", "кешбэк", "кэшбэк", "бонус", "розыгрыш", "подар",
     "скидк", "промокод", "выигра", "приз", "вернем", "вернём",
@@ -405,8 +411,9 @@ def extract_date_hint(text: str) -> tuple[str, str]:
     )
     if deadline:
         return "deadline_only", tidy(deadline.group(0))
+    activity_months = "|".join(MONTHS_LOCATIVE)
     activity = re.search(
-        rf"\b(?:за\s+покупки\s+)?в\s+(?:{month_names})(?:\s+20\d{{2}})?\b",
+        rf"\b(?:за\s+покупки\s+)?в\s+(?:{activity_months})(?:\s+20\d{{2}})?\b",
         text, re.IGNORECASE,
     )
     if activity:
