@@ -246,7 +246,7 @@ def recheck_exact_period(
         checked += 1
         if page_text:
             combined = clean_text(f"{evidence} {page_text}")
-            period = extract_period(combined, item.published_at.date())
+            period = extract_period(page_text, item.published_at.date())
             if period:
                 return period, combined, final_url or url
             evidence = combined
@@ -535,7 +535,7 @@ def evaluate(item: RawItem) -> Evaluation:
             evidence_url=evidence_url,
         )
 
-    period = extract_period(evidence, item.published_at.date())
+    period = extract_period(item.text, item.published_at.date())
 
     # Never infer the promotion period solely from "today" in a social post.
     # Exact dates must be present in the source evidence.
@@ -553,11 +553,11 @@ def evaluate(item: RawItem) -> Evaluation:
             evidence_url=evidence_url,
         )
 
-    reward = extract_reward(item.text, evidence, item.bank)
+    reward = extract_reward(item.text, item.text, item.bank)
     if not reward:
         return Evaluation(False, "no_reward", evidence_url=evidence_url)
 
-    conditions = extract_conditions(item.text, evidence, item.bank)
+    conditions = extract_conditions(item.text, item.text, item.bank)
     if not conditions:
         return Evaluation(False, "no_conditions", evidence_url=evidence_url)
 
