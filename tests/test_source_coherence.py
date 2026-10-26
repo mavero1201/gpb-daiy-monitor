@@ -47,6 +47,16 @@ class SourceCoherenceTests(unittest.TestCase):
         post = "Разыгрываем 18,5 МЛН бонусов Спасибо. Откройте вклад до 31 октября."
         self.assertIn("18,5 МЛН бонусов", extract_reward(post, post, "Сбер"))
 
+    def test_explicit_ruble_return_is_not_confused_with_spending(self):
+        from evaluator import extract_reward, classify_mechanic, classify_goal
+        post = (
+            "До 22 ноября оформите кредитную карту. "
+            "Потратьте 10 000 ₽ в первый месяц. Мы вернем 3 000 ₽."
+        )
+        self.assertEqual(extract_reward(post, post, "Т-Банк"), "Возврат 3 000 ₽")
+        self.assertEqual(classify_mechanic(post), "денежный возврат")
+        self.assertEqual(classify_goal(post), "оформление банковского продукта")
+
     def test_million_ruble_prize_is_recognized(self):
         from evaluator import extract_reward
         post = "Марафон призов: уже в ноябре разыграем главный приз — 5 млн рублей."
