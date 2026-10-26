@@ -14,6 +14,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from collector import RawItem, clean_text, _fetch_document
 from sources import official_link_priority
+from official_rules_search import discover_official_rule_urls
 
 MONTHS = {
     "января": 1, "февраля": 2, "марта": 3, "апреля": 4,
@@ -234,6 +235,13 @@ def recheck_exact_period(
         if is_external_link(link)
     ]
     queue = sorted(dict.fromkeys(queue), key=lambda url: _rule_link_priority(item.bank, url))
+
+    # A social post often omits the official rules link. Search official
+    # bank domains for candidates; never use search snippets as evidence.
+    # The same matching-rules check below must validate the fetched document.
+    for candidate in discover_official_rule_urls(item.bank, item.text):
+        if candidate not in queue:
+            queue.append(candidate)
 
     seen: set[str] = set()
     checked = 0
