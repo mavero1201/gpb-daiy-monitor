@@ -80,6 +80,8 @@ class Evaluation:
     promo_start: date | None = None
     promo_end: date | None = None
     evidence_url: str = ""
+    date_status: str = ""
+    date_evidence: str = ""
 
 
 def tidy(text: str) -> str:
@@ -647,45 +649,70 @@ def evaluate(item: RawItem) -> Evaluation:
             evidence_url=evidence_url,
         )
 
-    period = extract_period(item.text, item.published_at.date())
+    # A mixed social post can describe separate offers with separate periods.
+    # Never borrow the reward or dates of one offer for another.
+    if has_multiple_offers(item.text):
+        return Evaluation(
+            False, "multiple_offers_require_split",
+            evidence_url=item.url,
+            date_status="multiple_offers",
+            date_evidence="Несколько разных предложений в одной публикации",
+        )
 
-    # Never infer the promotion period solely from "today" in a social post.
-    # Exact dates must be present in the source evidence.
+    period = extract_period(item.text, item.published_at.date())
+    if not period:
+        period = extract_single_day_event(item.text, item.published_at.date())
+
+    # Do not infer a period from the post date or a deadline alone.
     if not period:
         period, evidence, evidence_url = recheck_exact_period(
-            item,
-            evidence,
-            evidence_url,
+            item, evidence, evidence_url,
         )
+
+    # Keep fields from the original offer together for audit and review.
+    # The linked rules can establish dates only when the reward matches.
+    reward = extract_reward(item.text, item.text, item.bank)
+    conditions = extract_conditions(item.text, item.text, item.bank)
+    title = make_title(item.text, item.bank)
+    mechanic = classify_mechanic(item.text)
+    goal = classify_goal(item.text)
+    base = dict(
+        title=title, reward=reward, conditions=conditions,
+        mechanic=mechanic, goal=goal, evidence_url=evidence_url,
+    )
 
     if not period:
+        date_status, date_evidence = extract_date_hint(item.text)
+        reason = {
+            "deadline_only": "deadline_only_needs_start",
+            "activity_month_only": "activity_month_only_needs_terms",
+        }.get(date_status, "no_exact_period_after_recheck")
         return Evaluation(
-            False,
-            "no_exact_period_after_recheck",
-            evidence_url=evidence_url,
+            False, reason, **base,
+            date_status=date_status, date_evidence=date_evidence,
         )
 
-    reward = extract_reward(item.text, item.text, item.bank)
-    if not reward:
-        return Evaluation(False, "no_reward", evidence_url=evidence_url)
-
-    conditions = extract_conditions(item.text, item.text, item.bank)
-    if not conditions:
-        return Evaluation(False, "no_conditions", evidence_url=evidence_url)
-
     start, end = period
+    if not reward:
+        return Evaluation(
+            False, "no_reward", **base, promo_start=start, promo_end=end,
+        )
+    if not conditions:
+        return Evaluation(
+            False, "no_conditions", **base, promo_start=start, promo_end=end,
+        )
     if end < item.published_at.date():
-        return Evaluation(False, "period_ended_before_publication", evidence_url=evidence_url)
+        return Evaluation(
+            False, "period_ended_before_publication",
+            **base, promo_start=start, promo_end=end,
+        )
 
     return Evaluation(
-        True,
-        "included",
-        title=make_title(item.text, item.bank),
-        goal=classify_goal(item.text),
-        mechanic=classify_mechanic(item.text),
-        reward=reward,
-        conditions=conditions,
-        promo_start=start,
-        promo_end=end,
-        evidence_url=evidence_url,
+        True, "included", **base,
+        promo_start=start, promo_end=end,
+        date_status="single_day" if start == end else "exact_period",
+        date_evidence=(
+            f"{start:%d.%m.%Y}" if start == end
+            else f"{start:%d.%m.%Y} - {end:%d.%m.%Y}"
+        ),
     )
