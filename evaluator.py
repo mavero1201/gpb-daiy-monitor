@@ -426,7 +426,8 @@ def extract_reward(post_text: str, evidence_text: str, bank: str) -> str:
         for sentence in sentences(source):
             low_sentence = sentence.lower()
             if any(x in low_sentence for x in ("кешбэк", "кэшбэк", "бонус", "розыгрыш", "подар", "приз", "скидк")):
-                if re.search(r"\d|%|₽|руб|балл", sentence, re.IGNORECASE):
+                without_dates = re.sub(r"\b\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\b", "", sentence)
+                if re.search(r"\d[\d\s]*(?:%|₽|руб)|\b\d+\s*балл", without_dates, re.IGNORECASE):
                     return tidy(sentence)
     return ""
 
