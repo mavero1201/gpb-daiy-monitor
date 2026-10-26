@@ -34,14 +34,14 @@ class OfficialRulesSearchTests(unittest.TestCase):
     def test_rule_dates_are_fetched_not_inferred_from_search(self, search, fetch):
         search.return_value = ["https://www.psbank.ru/promo/rules.pdf"]
         fetch.return_value = (
-            "Правила акции: приз 5 млн рублей. Период участия с 01.08.2026 по 31.10.2026.",
+            "Правила акции: приз 5 000 000 ₽. Период участия с 01.08.2026 по 31.10.2026.",
             None,
             "https://www.psbank.ru/promo/rules.pdf",
         )
         item = RawItem(
             bank="ПСБ", source_id="psb_tg", source_type="telegram",
             published_at=datetime(2026, 10, 19, tzinfo=ZoneInfo("Europe/Moscow")),
-            text="Участвуйте в Марафоне призов. Приз 5 млн рублей. Оформите карту.",
+            text="Участвуйте в Марафоне призов. Приз 5 000 000 ₽. Оформите карту.",
             url="https://t.me/psbbank/3740", external_links=[],
         )
         period, evidence, source = recheck_exact_period(item, item.text, item.url)
