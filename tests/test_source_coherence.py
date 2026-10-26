@@ -32,6 +32,16 @@ class SourceCoherenceTests(unittest.TestCase):
         self.assertFalse(result.included)
         self.assertEqual(result.reason, "no_reward")
 
+    def test_dates_are_not_mistaken_for_reward(self):
+        from evaluator import extract_reward
+        post = "Подарок за оплату картой ВТБ. С 19.10.2026 по 25.10.2026."
+        self.assertEqual(extract_reward(post, post, "ВТБ"), "")
+
+    def test_numeric_cashback_is_reward(self):
+        from evaluator import extract_reward
+        post = "Оплатите картой ВТБ и получите кешбэк 6%."
+        self.assertIn("6%", extract_reward(post, post, "ВТБ"))
+
     def test_review_queue_keeps_rejected_candidate(self):
         from pipeline import write_audit
         from tempfile import TemporaryDirectory
