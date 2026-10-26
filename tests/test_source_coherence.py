@@ -54,7 +54,7 @@ class SourceCoherenceTests(unittest.TestCase):
 
     def test_deadline_is_not_invented_as_full_period(self):
         from evaluator import extract_date_hint
-        post = "До 22 ноября оформите кредитку. Потратьте 10 000 ₽ и вернем 3 000 ₽."
+        post = "До 22 ноября оформите кредитную карту. Потратьте 10 000 ₽ и вернем 3 000 ₽."
         self.assertEqual(extract_date_hint(post), ("deadline_only", "До 22 ноября"))
         with patch("evaluator.build_evidence", return_value=(post, "https://t.me/tbank/11222")), \
              patch("evaluator.recheck_exact_period", return_value=(None, post, "https://t.me/tbank/11222")):
