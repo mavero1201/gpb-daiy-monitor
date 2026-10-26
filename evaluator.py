@@ -535,6 +535,14 @@ def extract_reward(post_text: str, evidence_text: str, bank: str) -> str:
         if main_prize:
             return f"Розыгрыш: главный приз {tidy(main_prize.group(1))}"
 
+    cash_return = re.search(
+        r"\b(?:верн(?:ем|ём|ут|ётся|ется)|возвращаем|вернём)\s+"
+        r"(\d[\d\s]*\s*(?:₽|руб(?:лей|ля|ль|\.)?))",
+        post, re.IGNORECASE,
+    )
+    if cash_return:
+        return f"Возврат {tidy(cash_return.group(1))}"
+
     for source in (post, evidence_text):
         for sentence in sentences(source):
             low_sentence = sentence.lower()
@@ -604,6 +612,8 @@ def classify_goal(post_text: str) -> str:
     low = tidy(post_text).lower()
     if any(x in low for x in ("новым клиент", "новые клиенты", "новым владельц", "впервые оформ")):
         return "привлечение новых клиентов"
+    if any(x in low for x in ("оформите кредит", "оформите карту", "откройте вклад", "открывайте вклад")):
+        return "оформление банковского продукта"
     return "транзакционная активность текущих клиентов"
 
 
@@ -619,6 +629,8 @@ def classify_mechanic(post_text: str) -> str:
         return "реферальная программа"
     if "бонус" in low or "балл" in low:
         return "бонусы"
+    if re.search(r"\b(?:вернем|вернём|возвращаем)\s+\d", low):
+        return "денежный возврат"
     return "промо-механика"
 
 
