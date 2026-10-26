@@ -246,7 +246,7 @@ def recheck_exact_period(
         checked += 1
         if page_text:
             combined = clean_text(f"{evidence} {page_text}")
-            period = extract_period(page_text, item.published_at.date())
+            period = period_from_matching_rules(item, page_text)
             if period:
                 return period, combined, final_url or url
             evidence = combined
@@ -364,6 +364,102 @@ def extract_period(text: str, publication_date: date) -> tuple[date, date] | Non
     return None
 
 
+def extract_single_day_event(text: str, publication_date: date) -> tuple[date, date] | None:
+    """Recognize an explicitly dated one-day promo, for REVIEW only.
+
+    The quality gate rejects single-day offers from automatic publication.
+    A standalone date is not a general campaign start/end period.
+    """
+    month_names = "|".join(MONTHS)
+    for match in re.finditer(
+        rf"\b(\d{{1,2}})\s+({month_names})(?:\s+(20\d{{2}}))?\b",
+        text, re.IGNORECASE,
+    ):
+        nearby = text[max(0, match.start() - 100):min(len(text), match.end() + 120)].lower()
+        if not any(token in nearby for token in (
+            "кешбэк", "кэшбэк", "скидк", "акци", "альфа-пятниц",
+            "возвращаем", "розыгрыш", "оплат",
+        )):
+            continue
+        try:
+            day = date(
+                int(match.group(3)) if match.group(3) else publication_date.year,
+                MONTHS[match.group(2).lower()],
+                int(match.group(1)),
+            )
+        except ValueError:
+            continue
+        if abs((day - publication_date).days) <= 45:
+            return day, day
+    return None
+
+
+def extract_date_hint(text: str) -> tuple[str, str]:
+    """Keep deadline/activity-month wording without inventing campaign dates."""
+    month_names = "|".join(MONTHS)
+    deadline = re.search(
+        rf"\bдо\s+\d{{1,2}}\s+(?:{month_names})(?:\s+20\d{{2}})?\b",
+        text, re.IGNORECASE,
+    )
+    if deadline:
+        return "deadline_only", tidy(deadline.group(0))
+    activity = re.search(
+        rf"\b(?:за\s+покупки\s+)?в\s+(?:{month_names})(?:\s+20\d{{2}})?\b",
+        text, re.IGNORECASE,
+    )
+    if activity:
+        return "activity_month_only", tidy(activity.group(0))
+    return "", ""
+
+
+def has_multiple_offers(text: str) -> bool:
+    """Do not merge different mechanics and their unrelated dates in one post."""
+    low = tidy(text).lower()
+    referral_and_marketplace = (
+        any(x in low for x in ("рекоменд", "другу", "друзьям"))
+        and "скидк" in low
+        and any(x in low for x in ("wildberries", "wb"))
+    )
+    cashback_and_redemption = (
+        ("кешбэк" in low or "кэшбэк" in low)
+        and "специальный курс" in low
+        and ("бонус" in low or "спасибо" in low)
+    )
+    return referral_and_marketplace or cashback_and_redemption
+
+
+def period_from_matching_rules(
+    item: RawItem, page_text: str,
+) -> tuple[date, date] | None:
+    """Only accept rule dates near the same reward, never from an arbitrary page."""
+    reward = extract_reward(item.text, item.text, item.bank)
+    amounts = re.findall(
+        r"\d+(?:[,.]\d+)?\s*(?:%|₽|руб\w*|млн)",
+        reward.lower(), re.IGNORECASE,
+    )
+    if not amounts:
+        return None
+    compact_page = re.sub(r"\s+", "", page_text.lower())
+    for amount in amounts:
+        needle = re.sub(r"\s+", "", amount.lower())
+        start = 0
+        while True:
+            pos = compact_page.find(needle, start)
+            if pos < 0:
+                break
+            # Find the corresponding position in the uncompressed text.
+            # Use a conservative local excerpt: unrelated rules stay excluded.
+            words = list(re.finditer(re.escape(amount.strip()).replace(r"\ ", r"\s*"), page_text, re.IGNORECASE))
+            for found in words[:10]:
+                excerpt = page_text[max(0, found.start() - 1100):min(len(page_text), found.end() + 1100)]
+                period = extract_period(excerpt, item.published_at.date())
+                if period:
+                    return period
+            start = pos + len(needle)
+            break
+    return None
+
+
 def find_amount(text: str) -> str:
     match = re.search(r"\b\d[\d\s]{0,12}\s*(?:₽|руб(?:лей|ля|ль|\.)?)", text, re.IGNORECASE)
     return tidy(match.group(0)) if match else ""
@@ -421,6 +517,21 @@ def extract_reward(post_text: str, evidence_text: str, bank: str) -> str:
         pct = re.search(r"\b\d{1,3}\s*%", post)
         if pct:
             return f"Скидка {tidy(pct.group(0))}"
+
+    if any(x in low for x in ("розыгрыш", "разыгрыв", "разыграем", "приз")):
+        bonus_prize = re.search(
+            r"\b(\d+(?:[,.]\d+)?\s*(?:млн|миллион\w*)\s+бонус\w*(?:\s+спасибо)?)",
+            post, re.IGNORECASE,
+        )
+        if bonus_prize:
+            return f"Розыгрыш {tidy(bonus_prize.group(1))}"
+        main_prize = re.search(
+            r"главн\w*\s+приз\s*[-–—:]*\s*"
+            r"(\d+(?:[,.]\d+)?\s*(?:млн|миллион\w*)\s*(?:₽|руб\w*))",
+            post, re.IGNORECASE,
+        )
+        if main_prize:
+            return f"Розыгрыш: главный приз {tidy(main_prize.group(1))}"
 
     for source in (post, evidence_text):
         for sentence in sentences(source):
