@@ -61,8 +61,11 @@ def main() -> None:
     ) = run_pipeline(republish_current_week=republish)
 
     write_audit(start, end, evaluated, source_checks)
-    report_path = write_review_report(Path('artifacts'), start.date(), end.date())
-    print(f'REVIEW REPORT: {report_path}')
+    audit_dir = Path('artifacts')
+    period_key = f'{start:%Y-%m-%d}_{end:%Y-%m-%d}'
+    if (audit_dir / f'review_queue_{period_key}.csv').is_file() and (audit_dir / f'audit_sources_{period_key}.csv').is_file():
+        report_path = write_review_report(audit_dir, start.date(), end.date())
+        print(f'REVIEW REPORT: {report_path}')
     review_count = sum(1 for _, result in evaluated if result.reason in {
         "no_exact_period_after_recheck", "quality_unstructured_card",
         "quality_irrelevant_text", "quality_mechanic_mismatch",
