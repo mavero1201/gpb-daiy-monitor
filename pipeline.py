@@ -195,6 +195,32 @@ def write_audit(start, end, evaluated, source_checks):
                 result.title,
             ])
 
+    review_reasons = {
+        "no_exact_period_after_recheck", "quality_unstructured_card",
+        "quality_irrelevant_text", "quality_mechanic_mismatch",
+        "quality_unverified_reward", "quality_unknown_mechanic",
+        "quality_no_bank_product_link", "quality_single_day_requires_review",
+        "quality_missing_required_field", "quality_invalid_source",
+        "no_reward", "no_conditions",
+    }
+    review_path = ARTIFACT_DIR / f"review_queue_{period_key}.csv"
+    with review_path.open("w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.writer(f, delimiter=";")
+        writer.writerow(["bank", "source_id", "published_at", "url", "reason",
+                         "title", "reward", "conditions", "mechanic",
+                         "promo_start", "promo_end", "evidence_url", "source_text"])
+        for item, result in evaluated:
+            if result.reason not in review_reasons:
+                continue
+            writer.writerow([
+                item.bank, item.source_id, item.published_at.isoformat(),
+                item.url, result.reason, result.title, result.reward,
+                result.conditions, result.mechanic,
+                result.promo_start.isoformat() if result.promo_start else "",
+                result.promo_end.isoformat() if result.promo_end else "",
+                result.evidence_url, item.text,
+            ])
+
     source_path = ARTIFACT_DIR / f"audit_sources_{period_key}.csv"
     with source_path.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.writer(f, delimiter=";")
@@ -240,6 +266,7 @@ def write_audit(start, end, evaluated, source_checks):
                 "period_end": end.date().isoformat(),
                 "raw_items": len(evaluated),
                 "included": sum(1 for _, r in evaluated if r.included),
+                "requires_review": sum(1 for _, r in evaluated if r.reason in review_reasons),
                 "banks": summary,
             },
             ensure_ascii=False,
@@ -248,4 +275,4 @@ def write_audit(start, end, evaluated, source_checks):
         encoding="utf-8",
     )
 
-    return [item_path, source_path, summary_path]
+    return [item_path, source_path, summary_path, review_path]
