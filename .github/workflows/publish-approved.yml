@@ -1,0 +1,50 @@
+name: Publish approved Daily Banking digest
+
+on:
+  workflow_dispatch:
+    inputs:
+      audit_run_id:
+        description: "GitHub Actions run ID of the reviewed audit-preview"
+        type: string
+        required: true
+      confirm_approved_preview:
+        description: "I reviewed and explicitly approve this exact digest for Telegram"
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  publish:
+    if: ${{ inputs.confirm_approved_preview }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Download the exact preview from the reviewed run
+        uses: actions/download-artifact@v4
+        with:
+          name: weekly-monitor-audit
+          run-id: ${{ inputs.audit_run_id }}
+          github-token: ${{ github.token }}
+          path: approved_artifact
+      - name: Reject empty or ambiguous artifact selection
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          paths = list(Path("approved_artifact").glob("preview_*.html"))
+          if len(paths) != 1:
+              raise SystemExit(f"Expected exactly one preview, got {len(paths)}")
+          print("Selected approved preview:", paths[0])
+          PY
+      - name: Publish exact approved preview (no new collection)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: "-1004291568481"
+        run: python publish_approved.py --preview approved_artifact/preview_*.html --confirm
