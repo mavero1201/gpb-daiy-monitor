@@ -7,9 +7,9 @@ from evaluator import Evaluation, evaluate
 from quality import validate_card
 
 
-def item(text, links=()):
+def item(text, links=(), bank="ВТБ"):
     return SimpleNamespace(
-        bank="ВТБ", text=text, published_at=datetime(2026, 10, 22, tzinfo=timezone.utc),
+        bank=bank, text=text, published_at=datetime(2026, 10, 22, tzinfo=timezone.utc),
         url="https://t.me/bankvtb/3883", external_links=list(links),
         source_type="telegram", source_id="vtb_tg",
     )
@@ -93,9 +93,9 @@ class SourceCoherenceTests(unittest.TestCase):
             (date(2026, 10, 23), date(2026, 10, 23)),
         )
         with patch("evaluator.build_evidence", return_value=(post, "https://t.me/AlfaBank/4874")):
-            result = evaluate(item(post))
+            result = evaluate(item(post, bank="Альфа-Банк"))
         self.assertTrue(result.included)
-        self.assertEqual(validate_card(item(post), result), "quality_single_day_requires_review")
+        self.assertEqual(validate_card(item(post, bank="Альфа-Банк"), result), "quality_single_day_requires_review")
 
     def test_mixed_post_does_not_combine_two_offers(self):
         from evaluator import has_multiple_offers
