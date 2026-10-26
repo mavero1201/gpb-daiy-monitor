@@ -67,6 +67,8 @@ def main() -> None:
         "quality_no_bank_product_link", "quality_single_day_requires_review",
         "quality_missing_required_field", "quality_invalid_source",
         "no_reward", "no_conditions",
+        "deadline_only_needs_start", "activity_month_only_needs_terms",
+        "multiple_offers_require_split",
     })
 
     strict_sources = os.getenv("STRICT_SOURCES") == "1"
@@ -112,7 +114,7 @@ def main() -> None:
             + ".</i>"
         )
 
-    if review_count:
+    if review_count and os.getenv("PUBLISH_TO_TELEGRAM") != "1":
         blocks.append(f"<i>Требуют дополнительной проверки: {review_count}. См. review_queue в архиве запуска. Это не означает отсутствие акций.</i>")
 
     if len(blocks) == 2:
