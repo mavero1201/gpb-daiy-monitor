@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from main import send_telegram
+from review_report import write_review_report
 from collector import previous_calendar_week
 from pipeline import (
     load_state,
@@ -60,6 +61,8 @@ def main() -> None:
     ) = run_pipeline(republish_current_week=republish)
 
     write_audit(start, end, evaluated, source_checks)
+    report_path = write_review_report(Path('artifacts'), start.date(), end.date())
+    print(f'REVIEW REPORT: {report_path}')
     review_count = sum(1 for _, result in evaluated if result.reason in {
         "no_exact_period_after_recheck", "quality_unstructured_card",
         "quality_irrelevant_text", "quality_mechanic_mismatch",
