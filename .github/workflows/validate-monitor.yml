@@ -24,3 +24,32 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - run: python -m unittest discover -s tests -p 'test_*.py' -v
+
+  audit-preview:
+    needs: regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout working branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Collect and audit previous week (never publish)
+        env:
+          PUBLISH_TO_TELEGRAM: '0'
+          REPUBLISH_WEEK: '0'
+          FORCE_RUN: '1'
+          STRICT_SOURCES: '1'
+        run: python preview.py
+      - name: Upload review and audit files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-review-preview
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 90
