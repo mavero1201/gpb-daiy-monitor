@@ -383,6 +383,9 @@ def extract_single_day_event(text: str, publication_date: date) -> tuple[date, d
         rf"\b(\d{{1,2}})\s+({month_names})(?:\s+(20\d{{2}}))?\b",
         text, re.IGNORECASE,
     ):
+        before = text[max(0, match.start() - 20):match.start()].lower()
+        if re.search(r"\b(?:до|по|к|после|с)\s*$", before):
+            continue  # A deadline is not a one-day campaign period.
         nearby = text[max(0, match.start() - 100):min(len(text), match.end() + 120)].lower()
         if not any(token in nearby for token in (
             "кешбэк", "кэшбэк", "скидк", "акци", "альфа-пятниц",
