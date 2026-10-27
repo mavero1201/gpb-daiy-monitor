@@ -472,7 +472,11 @@ def period_from_matching_rules(
             words = list(re.finditer(re.escape(amount.strip()).replace(r"\ ", r"\s*"), page_text, re.IGNORECASE))
             for found in words[:10]:
                 excerpt = page_text[max(0, found.start() - 1100):min(len(page_text), found.end() + 1100)]
-                period = extract_period(excerpt, item.published_at.date())
+                # Без даты публикации год не выводим из времени сканирования.
+                if item.published_at is None and not re.search(r"\b20\d{2}\b", excerpt):
+                    continue
+                reference_date = item.published_at.date() if item.published_at else date.today()
+                period = extract_period(excerpt, reference_date)
                 if period:
                     return period
             start = pos + len(needle)
@@ -689,9 +693,16 @@ def evaluate(item: RawItem) -> Evaluation:
             date_evidence="Несколько разных предложений в одной публикации",
         )
 
-    period = extract_period(item.text, item.published_at.date())
-    if not period:
-        period = extract_single_day_event(item.text, item.published_at.date())
+    # Если отсутствует дата публикации, для периода требуется явный год.
+    reference_date = item.published_at.date() if item.published_at else date.today()
+    explicit_year = bool(re.search(r"\b20\d{2}\b", item.text))
+    period = (
+        extract_period(item.text, reference_date)
+        if item.published_at is not None or explicit_year
+        else None
+    )
+    if not period and item.published_at is not None:
+        period = extract_single_day_event(item.text, reference_date)
 
     # Do not infer a period from the post date or a deadline alone.
     if not period:
@@ -731,7 +742,7 @@ def evaluate(item: RawItem) -> Evaluation:
         return Evaluation(
             False, "no_conditions", **base, promo_start=start, promo_end=end,
         )
-    if end < item.published_at.date():
+    if item.published_at is not None and end < item.published_at.date():
         return Evaluation(
             False, "period_ended_before_publication",
             **base, promo_start=start, promo_end=end,
