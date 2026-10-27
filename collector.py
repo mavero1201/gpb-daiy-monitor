@@ -48,7 +48,7 @@ class RawItem:
     bank: str
     source_id: str
     source_type: str
-    published_at: datetime
+    published_at: datetime | None
     text: str
     url: str
     external_links: list[str]
@@ -210,7 +210,13 @@ def _same_domain(url: str, root_url: str) -> bool:
 
 def _looks_like_candidate_link(label: str, href: str) -> bool:
     value = f"{label} {href}".lower()
-    return any(x in value for x in PROMO_HINTS) and any(x in value for x in BANKING_HINTS + ("акци", "promo"))
+    return (
+        any(x in value for x in PROMO_HINTS)
+        and any(x in value for x in BANKING_HINTS + ("акци", "promo"))
+    ) or (
+        any(x in value for x in ("правила акции", "условия акции", "promotion", "/promo/", "/actions/", ".pdf"))
+        and not any(x in value for x in ("privacy", "политика конфиденциальности"))
+    )
 
 
 def _parse_datetime_value(value: str) -> datetime | None:
@@ -444,8 +450,13 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
             if _looks_like_candidate_link(clean_text(label), href) and href not in candidate_urls:
                 candidate_urls.append(href)
 
-    # Ограничиваем обход, чтобы один тяжёлый сайт не блокировал недельный выпуск.
-    for url in candidate_urls[:35]:
+    # Каталоги просматриваются независимо от даты публикации. На карточке
+    # акции дата может отсутствовать; её период проверяется позднее по правилам.
+    # Срез в 35 ссылок не может служить доказательством полного охвата.
+    link_limit = 35
+    exhausted_limit = len(candidate_urls) > link_limit
+    fetch_errors = 0
+    for url in candidate_urls[:link_limit]:
         if url in seen_urls:
             continue
         seen_urls.add(url)
@@ -453,9 +464,11 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
         try:
             text, soup, final_url = _fetch_document(url)
         except Exception:
+            fetch_errors += 1
             continue
 
         if len(text) < 100:
+            fetch_errors += 1
             continue
 
         low = text.lower()
@@ -475,9 +488,9 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
             )
             published = _parse_datetime_value(explicit.group(1)) if explicit else _parse_datetime_value(final_url)
 
-        if not published or not (start <= published <= end):
-            continue
-
+        # Сроки акции определяет evaluator. published_at=None честно
+        # обозначает отсутствие подтверждённой даты публикации на сайте.
+        # НЕ заменяем эту дату временем сканирования или началом недели.
         links = []
         if soup is not None:
             for a in soup.select("a[href]"):
@@ -499,18 +512,26 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
             )
         )
 
-    # 0 карточек после обхода раздела сайта НЕ ДОКАЗЫВАЕТ отсутствие акций.
-    # Частая причина: каталог не содержит даты публикации или рендерится JS.
-    # Не допускаем фиктивного статуса успешной проверки.
+    # Даже HTTP 200 и извлечённые карточки не означают полного охвата.
+    # Ошибки части карточек и ограничение обхода считаются неполной проверкой.
+    if exhausted_limit or fetch_errors:
+        status = "limited"
+        error = f"Catalog traversal incomplete: {fetch_errors} failed pages; {len(candidate_urls)} links (cap {link_limit})"
+    elif not items:
+        status = "unverified_zero"
+        error = "No campaign candidates extracted; coverage cannot be certified"
+    else:
+        status = "ok"
+        error = ""
     return items, SourceCheck(
         bank=bank,
         source_id=source["id"],
         source_type="web",
         source_value=root_url,
-        status="ok" if items else "unverified_zero",
+        status=status,
         required=required,
         item_count=len(items),
-        error="" if items else "No verified campaign items extracted; manual coverage audit required",
+        error=error,
     )
 
 
