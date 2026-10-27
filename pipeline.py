@@ -127,26 +127,25 @@ def run_pipeline(republish_current_week: bool = False):
             result.reason = "already_published"
             continue
 
-        publication_day = item.published_at.date()
-
-        if start.date() <= publication_day <= end.date():
-            publish_items.append((item, result, pid, False))
+        # Правило выпуска: учитываем ПЕРВЫЙ ДЕНЬ участия, а не день
+        # публикации сообщения / документа и не факт действия на неделе.
+        # Повторный сбор старых публикаций не создаёт новое предложение.
+        if result.promo_start is None or result.promo_end is None:
+            result.included = False
+            result.reason = "missing_verified_campaign_period"
             continue
 
-        # Всегда перепроверяем ровно одну предыдущую календарную неделю,
-        # если у мониторинга уже есть история публикаций. Это позволяет
-        # подхватить акцию, которую прошлый выпуск не смог подтвердить,
-        # даже если после этого уже был опубликован пустой текущий выпуск.
-        if (
-            has_publication_history
-            and not republish_current_week
-            and recovery_start <= publication_day <= recovery_end
-        ):
-            recovered_items.append((item, result, pid, True))
+        if not (start.date() <= result.promo_start <= end.date()):
+            result.included = False
+            result.reason = "outside_launch_week"
             continue
 
-        result.included = False
-        result.reason = "outside_current_or_recovery_period"
+        if result.promo_end < result.promo_start:
+            result.included = False
+            result.reason = "invalid_campaign_period"
+            continue
+
+        publish_items.append((item, result, pid, False))
 
     return start, end, evaluated, source_checks, publish_items, recovered_items, state
 
