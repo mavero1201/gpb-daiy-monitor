@@ -499,14 +499,18 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
             )
         )
 
+    # 0 карточек после обхода раздела сайта НЕ ДОКАЗЫВАЕТ отсутствие акций.
+    # Частая причина: каталог не содержит даты публикации или рендерится JS.
+    # Не допускаем фиктивного статуса успешной проверки.
     return items, SourceCheck(
         bank=bank,
         source_id=source["id"],
         source_type="web",
         source_value=root_url,
-        status="ok",
+        status="ok" if items else "unverified_zero",
         required=required,
         item_count=len(items),
+        error="" if items else "No verified campaign items extracted; manual coverage audit required",
     )
 
 
