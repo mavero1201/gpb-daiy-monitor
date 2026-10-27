@@ -29,6 +29,7 @@ SOURCE_REGISTRY = [
         "bank": "ВТБ",
         "sources": [
             {"id": "vtb_tg", "type": "telegram", "value": "BankVTB", "url": "https://t.me/BankVTB", "role": "official_channel", "required": True, "automatic": True},
+            {"id": "vtb_promos_tg", "type": "telegram", "value": "vtbvygoda", "url": "https://t.me/vtbvygoda", "role": "official_loyalty_channel", "required": True, "automatic": True},
             {"id": "vtb_max", "type": "max", "value": "vtb", "url": "https://max.ru/vtb", "role": "official_channel", "required": False, "automatic": False},
             {"id": "vtb_web_debit", "type": "web", "value": "https://www.vtb.ru/personal/karty/debetovye/", "url": "https://www.vtb.ru/personal/karty/debetovye/", "role": "debit_cards", "required": True, "automatic": True},
             {"id": "vtb_web_cards", "type": "web", "value": "https://www.vtb.ru/personal/karty/", "url": "https://www.vtb.ru/personal/karty/", "role": "cards_promotions", "required": False, "automatic": True},
