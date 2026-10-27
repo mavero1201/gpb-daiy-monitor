@@ -30,7 +30,7 @@ class WebCandidatePeriodTests(unittest.TestCase):
             '<html><body><p>' + ('Банковские предложения по картам. ' * 7) + '</p><a href="/promo/new-reward">Кешбэк за покупки картой</a></body></html>',
             ROOT,
         )
-        card = html_document(f"<html><body><p>{card_text}</p></body></html>", CARD)
+        card = html_document(f"<html><body><p>{card_text} Условия участия: покупка по карте банка в торговой точке. Подробности о порядке начисления вознаграждения указаны в правилах предложения.</p></body></html>", CARD)
 
         def fetch(url):
             return root if url == ROOT else card if url == CARD else None
@@ -75,7 +75,7 @@ class WebCandidatePeriodTests(unittest.TestCase):
         root = html_document("<html><body>" + links + "</body></html>", ROOT)
         page = html_document(
             "<html><body><p>Оплатите картой ВТБ покупку и получите 10% кешбэка. "
-            "Акция с 19.10.2026 по 25.10.2026.</p></body></html>", CARD
+            "Акция с 19.10.2026 по 25.10.2026. Условия участия: покупка по карте ВТБ в торговой точке. </p></body></html>", CARD
         )
         with patch("collector._fetch_document", side_effect=lambda url: root if url == ROOT else page):
             items, check = fetch_web_source(
