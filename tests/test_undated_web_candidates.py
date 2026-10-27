@@ -27,7 +27,7 @@ def html_document(value, url):
 class WebCandidatePeriodTests(unittest.TestCase):
     def collect(self, card_text):
         root = html_document(
-            '<html><body><a href="/promo/new-reward">Кешбэк за покупки картой</a></body></html>',
+            '<html><body><p>' + ('Банковские предложения по картам. ' * 7) + '</p><a href="/promo/new-reward">Кешбэк за покупки картой</a></body></html>',
             ROOT,
         )
         card = html_document(f"<html><body><p>{card_text}</p></body></html>", CARD)
