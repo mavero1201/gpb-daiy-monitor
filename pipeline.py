@@ -122,7 +122,7 @@ def run_pipeline(republish_current_week: bool = False):
             continue
 
         pid = promo_id(item, result)
-        if pid in sent and not (republish_current_week and start.date() <= item.published_at.date() <= end.date()):
+        if pid in sent and not (republish_current_week and result.promo_start is not None and start.date() <= result.promo_start <= end.date()):
             result.included = False
             result.reason = "already_published"
             continue
@@ -157,7 +157,7 @@ def update_state_after_publish(state: dict, start, end, published_items) -> dict
         sent[pid] = {
             "bank": item.bank,
             "title": result.title,
-            "publication_date": item.published_at.date().isoformat(),
+            "publication_date": item.published_at.date().isoformat() if item.published_at else None,
             "promo_start": result.promo_start.isoformat() if result.promo_start else None,
             "promo_end": result.promo_end.isoformat() if result.promo_end else None,
             "source_url": result.evidence_url or item.url,
@@ -185,7 +185,7 @@ def write_audit(start, end, evaluated, source_checks):
                 item.bank,
                 item.source_id,
                 item.source_type,
-                item.published_at.isoformat(),
+                item.published_at.isoformat() if item.published_at else "",
                 item.url,
                 result.included,
                 result.reason,
@@ -215,7 +215,7 @@ def write_audit(start, end, evaluated, source_checks):
             if result.reason not in review_reasons:
                 continue
             writer.writerow([
-                item.bank, item.source_id, item.published_at.isoformat(),
+                item.bank, item.source_id, item.published_at.isoformat() if item.published_at else "",
                 item.url, result.reason, result.title, result.reward,
                 result.conditions, result.mechanic,
                 result.promo_start.isoformat() if result.promo_start else "",
