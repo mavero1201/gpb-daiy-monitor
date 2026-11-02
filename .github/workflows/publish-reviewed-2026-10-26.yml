@@ -1,0 +1,74 @@
+name: Publish Daily Banking 26 Oct - 1 Nov (approval)
+
+on:
+  workflow_dispatch:
+    inputs:
+      approve_publish:
+        description: "Я проверила выпуск 26 октября - 1 ноября и подтверждаю публикацию в Telegram"
+        type: boolean
+        required: true
+        default: false
+
+concurrency:
+  group: publish-reviewed-daily-banking-2026-10-26
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: ${{ inputs.approve_publish }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted default branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install HTTP client
+        run: pip install requests==2.32.5
+
+      - name: Send exact pinned digest once
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: "-1004291568481"
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          from main import send_telegram
+
+          digest = Path("approved_digests/2026-10-26_2026-11-01.html")
+          marker = Path("data/manual_publications/2026-10-26_2026-11-01.sent")
+          if marker.exists():
+              raise SystemExit("ALREADY PUBLISHED: refusing duplicate Telegram send")
+          raw = digest.read_bytes()
+          expected_sha256 = "590665fa6c136665cb4cf4b5a2e278868b7796838353b8f6c5fa32f3604bf84f"
+          if hashlib.sha256(raw).hexdigest() != expected_sha256:
+              raise SystemExit("Publication aborted: approved text differs from pinned digest")
+          text = raw.decode("utf-8")
+          if text.count("<b>Вознаграждение:</b>") != 1:
+              raise SystemExit("Publication aborted: incorrect number of approved cards")
+          if "Мониторинг банковских акций Daily Banking" not in text:
+              raise SystemExit("Publication aborted: invalid digest heading")
+          if len(text) > 3900:
+              raise SystemExit("Publication aborted: Telegram message exceeds limit")
+          send_telegram(text)
+          marker.parent.mkdir(parents=True, exist_ok=True)
+          marker.write_text(expected_sha256 + "\n", encoding="utf-8")
+          print("APPROVED DIGEST SENT TO TELEGRAM")
+          PY
+
+      - name: Record delivery and prevent accidental re-send
+        run: |
+          git config user.name "gpb-daily-monitor"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/manual_publications/2026-10-26_2026-11-01.sent
+          git commit -m "Mark approved Daily Banking digest 2026-10-26 delivered"
+          git push origin HEAD:main
