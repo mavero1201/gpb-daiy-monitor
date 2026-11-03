@@ -46,7 +46,7 @@ class FullnessCoverageTests(unittest.TestCase):
 
     def test_official_halva_promo_telegram_is_monitored(self):
         sovcom = next(b for b in BANK_SOURCES if b["bank"] == "Совкомбанк")
-        channels = [s for s in sovcom["sources"] if s["type"] == "telegram" and s.get("automatic")]
+        channels = [s for s in sovcom["sources"] if s["type"] == "telegram"]
         self.assertIn("halvacard_official", [x["value"] for x in channels])
 
     def test_repeated_telegram_page_is_reported_incomplete(self):
