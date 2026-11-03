@@ -1,0 +1,50 @@
+name: Daily Banking pilot - read only (10 AM and 5 PM Moscow)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # UTC: 07:00 and 14:00 = Moscow 10:00 and 17:00.
+    # Python pilot enforces 03-16 Nov 2026 inclusive.
+    - cron: "0 7 * * *"
+    - cron: "0 14 * * *"
+
+concurrency:
+  group: daily-banking-pilot-2026-11
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  daily-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - name: Checkout tested pilot branch (does not touch published main code)
+        uses: actions/checkout@v4
+        with:
+          ref: fix/quality-recall-2026-10-26
+          persist-credentials: false
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install collector dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run read-only audit (NEVER TELEGRAM)
+        env:
+          PUBLISH_TO_TELEGRAM: "0"
+          STRICT_SOURCES: "0"
+        run: python daily_pilot.py
+
+      - name: Save daily audit, candidate queue and source coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-banking-pilot-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
