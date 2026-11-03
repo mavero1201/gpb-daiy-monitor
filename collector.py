@@ -208,15 +208,57 @@ def _same_domain(url: str, root_url: str) -> bool:
     return _base_domain(url) == _base_domain(root_url)
 
 
+def _allowed_catalog_link(url: str, root_url: str) -> bool:
+    """Follow the bank site and explicitly approved official document CDN only."""
+    if _same_domain(url, root_url):
+        return True
+    source_host = (urlparse(root_url).hostname or "").lower()
+    target_host = (urlparse(url).hostname or "").lower()
+    return (
+        source_host in ("alfabank.ru", "www.alfabank.ru")
+        and target_host == "alfabank.servicecdn.ru"
+    )
+
+
 def _looks_like_candidate_link(label: str, href: str) -> bool:
     value = f"{label} {href}".lower()
-    return (
-        any(x in value for x in PROMO_HINTS)
-        and any(x in value for x in BANKING_HINTS + ("акци", "promo"))
-    ) or (
-        any(x in value for x in ("правила акции", "условия акции", "promotion", "/promo/", "/actions/", ".pdf"))
-        and not any(x in value for x in ("privacy", "политика конфиденциальности"))
+    label_low = label.lower()
+    if any(x in value for x in ("privacy", "политика конфиденциальности")):
+        return False
+    if any(x in label_low for x in PROMO_HINTS):
+        return True
+    if any(x in value for x in ("правила акции", "условия акции", "/promo/", "/actions/")):
+        return True
+    # A PDF alone is not a promotion. Otherwise bank tariffs, privacy
+    # policies and shareholder documents dominate the review queue.
+    if href.lower().split("?")[0].endswith(".pdf"):
+        return any(x in label_low for x in ("халв", "лояльност", "промо"))
+    return False
+
+
+def _catalog_launch_date_hint(value: str):
+    """An explicit catalogue label date is for ranking, NEVER proof of inclusion."""
+    numeric = re.search(
+        r"\\b(?:с\\s*)?(\\d{1,2})[./](\\d{1,2})[./](20\\d{2})\\b",
+        value, re.IGNORECASE,
     )
+    if numeric:
+        day, month, year = map(int, numeric.groups())
+        try:
+            return datetime(year, month, day).date()
+        except ValueError:
+            return None
+    month_names = "|".join(MONTHS)
+    words = re.search(
+        rf"\\bс\\s*[«\\\"„]?(\\d{{1,2}})[»\\\"]?\\s+({month_names})\\s+(20\\d{{2}})\\b",
+        value, re.IGNORECASE,
+    )
+    if words:
+        try:
+            return datetime(int(words.group(3)), MONTHS[words.group(2).lower()], int(words.group(1))).date()
+        except ValueError:
+            return None
+    return None
 
 
 def _parse_datetime_value(value: str) -> datetime | None:
@@ -428,6 +470,7 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
         )
 
     candidate_urls: list[str] = []
+    candidate_hints: dict[str, str] = {}
 
     if root_soup is not None:
         for a in root_soup.select("a[href]"):
@@ -435,25 +478,38 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
             if not href or href.startswith(("mailto:", "tel:", "javascript:", "#")):
                 continue
             absolute = urljoin(final_root, href)
-            if not _same_domain(absolute, final_root):
+            if not _allowed_catalog_link(absolute, final_root):
                 continue
             label = clean_text(a.get_text(" ", strip=True))
             if _looks_like_candidate_link(label, absolute) and absolute not in candidate_urls:
                 candidate_urls.append(absolute)
+                parent_text = clean_text(a.parent.get_text(" ", strip=True)) if a.parent else ""
+                candidate_hints[absolute] = parent_text if len(parent_text) <= 700 else label
     else:
         # Jina Reader возвращает Markdown. Извлекаем ссылки из него и
         # продолжаем обход официальных карточек/правил банка.
-        for label, href in re.findall(r"\[([^\]]*)\]\((https?://[^)\s]+)\)", root_text):
+        for match in re.finditer(r"\[([^\]]*)\]\((https?://[^)\s]+)\)", root_text):
+            label, href = match.groups()
             href = href.rstrip(".,;")
-            if not _same_domain(href, final_root):
+            if not _allowed_catalog_link(href, final_root):
                 continue
             if _looks_like_candidate_link(clean_text(label), href) and href not in candidate_urls:
                 candidate_urls.append(href)
+                candidate_hints[href] = root_text[max(0, match.start() - 50):match.end() + 250]
 
     # Каталоги просматриваются независимо от даты публикации. На карточке
     # акции дата может отсутствовать; её период проверяется позднее по правилам.
     # Срез в 35 ссылок не может служить доказательством полного охвата.
     link_limit = 35
+    # Date-labelled entries of the reporting week come first, not the
+    # first 35 historical PDFs on a large rules page.
+    reporting_monday = end.date() - timedelta(days=6)
+    candidate_urls.sort(
+        key=lambda url: 0 if (
+            (date_hint := _catalog_launch_date_hint(candidate_hints.get(url, "")))
+            and reporting_monday <= date_hint <= end.date()
+        ) else 1
+    )
     exhausted_limit = len(candidate_urls) > link_limit
     fetch_errors = 0
     for url in candidate_urls[:link_limit]:
