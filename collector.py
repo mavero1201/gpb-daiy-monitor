@@ -239,7 +239,7 @@ def _looks_like_candidate_link(label: str, href: str) -> bool:
 def _catalog_launch_date_hint(value: str):
     """An explicit catalogue label date is for ranking, NEVER proof of inclusion."""
     numeric = re.search(
-        r"\\b(?:с\\s*)?(\\d{1,2})[./](\\d{1,2})[./](20\\d{2})\\b",
+        r"\b(?:с\s*)?(\d{1,2})[./](\d{1,2})[./](20\d{2})\b",
         value, re.IGNORECASE,
     )
     if numeric:
@@ -250,7 +250,7 @@ def _catalog_launch_date_hint(value: str):
             return None
     month_names = "|".join(MONTHS)
     words = re.search(
-        rf"\\bс\\s*[«\\\"„]?(\\d{{1,2}})[»\\\"]?\\s+({month_names})\\s+(20\\d{{2}})\\b",
+        rf'\bс\s*[«"„]?(\d{{1,2}})[»"]?\s+({month_names})\s+(20\d{{2}})\b',
         value, re.IGNORECASE,
     )
     if words:
