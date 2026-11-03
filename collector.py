@@ -596,8 +596,10 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
     )
 
 
-def collect_previous_week(recovery_days: int = 21) -> tuple[datetime, datetime, list[RawItem], list[SourceCheck]]:
-    start, end = previous_calendar_week()
+def collect_period(
+    start: datetime, end: datetime, recovery_days: int = 21,
+) -> tuple[datetime, datetime, list[RawItem], list[SourceCheck]]:
+    """Collect a selected reporting window; campaign start is verified downstream."""
     scan_start = start - timedelta(days=recovery_days)
     items: list[RawItem] = []
     checks: list[SourceCheck] = []
@@ -624,3 +626,9 @@ def collect_previous_week(recovery_days: int = 21) -> tuple[datetime, datetime, 
             checks.append(check)
 
     return start, end, items, checks
+
+
+def collect_previous_week(recovery_days: int = 21) -> tuple[datetime, datetime, list[RawItem], list[SourceCheck]]:
+    """Backward-compatible weekly entry point."""
+    start, end = previous_calendar_week()
+    return collect_period(start, end, recovery_days=recovery_days)
