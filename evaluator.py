@@ -307,6 +307,26 @@ def parse_numeric_date(day: str, month: str, year: str) -> date | None:
 
 
 def extract_period(text: str, publication_date: date) -> tuple[date, date] | None:
+    # Two explicit adjacent calendar dates, including cross-month weekends:
+    # "на 31 октября и 1 ноября" is a two-day offer, not a single day.
+    month_names = "|".join(MONTHS.keys())
+    weekend = re.search(
+        rf"\bна\s+(\d{{1,2}})\s+({month_names})\s+и\s+"
+        rf"(\d{{1,2}})\s+({month_names})(?:\s+(20\d{{2}}))?\b",
+        text, re.IGNORECASE,
+    )
+    if weekend:
+        first_day, first_month, last_day, last_month, year = weekend.groups()
+        year = int(year) if year else publication_date.year
+        try:
+            start_day = date(year, MONTHS[first_month.lower()], int(first_day))
+            end_year = year + 1 if first_month.lower() == "декабря" and last_month.lower() == "января" else year
+            end_day = date(end_year, MONTHS[last_month.lower()], int(last_day))
+            if (end_day - start_day).days == 1:
+                return start_day, end_day
+        except ValueError:
+            pass
+
     numeric = re.search(
         r"(?:с\s*)?(\d{1,2})[./](\d{1,2})[./](\d{2,4})\s*(?:-|–|—|по)\s*"
         r"(\d{1,2})[./](\d{1,2})[./](\d{2,4})",
