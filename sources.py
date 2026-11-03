@@ -93,6 +93,7 @@ SOURCE_REGISTRY = [
         "bank": "Совкомбанк",
         "sources": [
             {"id": "sovcom_tg", "type": "telegram", "value": "sovcombankofficial", "url": "https://t.me/sovcombankofficial", "role": "official_channel", "required": True, "automatic": True},
+            {"id": "sovcom_halva_tg", "type": "telegram", "value": "halvacard_official", "url": "https://t.me/halvacard_official", "role": "official_card_promo_channel", "required": True, "automatic": True},
             {"id": "sovcom_max", "type": "max", "value": "sovcombank", "url": "https://max.ru/sovcombank", "role": "official_channel", "required": False, "automatic": False},
             {"id": "sovcom_web_actions", "type": "web", "value": "https://sovcombank.ru/pages/vse-aktsii-karti-halva-", "url": "https://sovcombank.ru/pages/vse-aktsii-karti-halva-", "role": "halva_promotions", "required": True, "automatic": True},
         ],
