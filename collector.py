@@ -90,6 +90,7 @@ def fetch_telegram_source(bank: str, source: dict, start: datetime, end: datetim
     seen_urls: set[str] = set()
     seen_page_markers: set[int] = set()
     required = source.get("required", True)
+    completed_scan = False
 
     for _ in range(20):
         try:
@@ -114,6 +115,7 @@ def fetch_telegram_source(bank: str, source: dict, start: datetime, end: datetim
         soup = BeautifulSoup(response.text, "html.parser")
         wraps = soup.select(".tgme_widget_message_wrap")
         if not wraps:
+            completed_scan = True
             break
 
         oldest_seen: datetime | None = None
@@ -177,8 +179,10 @@ def fetch_telegram_source(bank: str, source: dict, start: datetime, end: datetim
             )
 
         if oldest_seen and oldest_seen <= start:
+            completed_scan = True
             break
         if not message_ids:
+            completed_scan = True
             break
 
         before_id = min(message_ids)
@@ -192,9 +196,10 @@ def fetch_telegram_source(bank: str, source: dict, start: datetime, end: datetim
         source_id=source["id"],
         source_type="telegram",
         source_value=channel,
-        status="ok",
+        status="ok" if completed_scan else "limited",
         required=required,
         item_count=len(items),
+        error="" if completed_scan else "Telegram pagination limit or stalled cursor before reaching scan start",
     )
 
 
