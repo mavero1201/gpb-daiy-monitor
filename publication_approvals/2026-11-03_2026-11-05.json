@@ -1,0 +1,10 @@
+{
+  "approved": true,
+  "sha256": "cb2eaed8a43f412e0977f1f323f1bf84bb5d4f6a159e57a2393e70120573c7c6",
+  "digest": "approved_digests/2026-11-03_2026-11-05.html",
+  "card_count": 6,
+  "target": "ДКМ_Мониторинг_акций_DAILY",
+  "authorized_by": "user in ChatGPT conversation",
+  "authorization": "User explicitly requested assistant approve and publish the already prepared digest",
+  "publication_mode": "one_time"
+}
