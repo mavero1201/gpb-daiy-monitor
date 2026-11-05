@@ -45,6 +45,10 @@ class DailyPilotTests(unittest.TestCase):
         self.assertIsNone(
             daily_pilot.explicit_dated_vtb_plus_suboffer(item, date(2026, 11, 3))
         )
+        item.bank = "Альфа-Банк"
+        self.assertIsNone(
+            daily_pilot.explicit_dated_vtb_plus_suboffer(item, date(2026, 11, 4))
+        )
 
     def test_no_invented_start_from_bank_promo_announcement(self):
         item = SimpleNamespace(
