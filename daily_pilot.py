@@ -9,10 +9,11 @@ import csv
 import json
 from collections import Counter
 from datetime import date, datetime, time
+import re
 from pathlib import Path
 
 from collector import MOSCOW, collect_period
-from evaluator import evaluate
+from evaluator import evaluate, MONTHS
 from pipeline import _mark_duplicates, write_audit
 from quality import validate_card
 from sources import BANKS, strict_coverage_failures
@@ -30,6 +31,58 @@ REVIEW_REASONS = {
     "quality_unknown_mechanic", "quality_no_bank_product_link",
     "quality_missing_required_field", "quality_invalid_source",
 }
+
+
+def explicit_dated_vtb_plus_suboffer(item, report_day: date):
+    """Flag a separately dated offer embedded inside a mixed official post.
+
+    This is ONLY a manual-review lead. The parent post remains unchanged;
+    a matched percentage or date never authorizes automatic publication.
+    The qualifier, action, percentage and transaction day must occur together.
+    """
+    if item.bank != "ВТБ" or item.source_type != "telegram" or not item.published_at:
+        return None
+    month_names = "|".join(MONTHS)
+    pattern = (
+        rf"подписчик\w*\s+ВТБ\s+Плюс.{0,150}?"
+        rf"(?P<pct>\d{{1,3}})\s*%\s*(?:кешбэк|кэшбэк)\w*"
+        rf"\s+на\s+покупки\s+(?P<day>\d{{1,2}})\s+"
+        rf"(?P<month>{month_names})(?:\s+(?P<year>20\d{{2}}))?"
+    )
+    match = re.search(pattern, item.text, re.IGNORECASE)
+    if not match:
+        return None
+    context = match.group(0).lower()
+    if not re.search(r"\b(?:выбра\w*|выбери\w*|активир\w*)\b", context):
+        return None
+    year = int(match.group("year")) if match.group("year") else item.published_at.year
+    try:
+        purchase_day = date(year, MONTHS[match.group("month").lower()], int(match.group("day")))
+    except ValueError:
+        return None
+    posted_day = item.published_at.date()
+    if not 0 <= (purchase_day - posted_day).days <= 14:
+        return None
+    if purchase_day != report_day:
+        return None
+    categories = re.search(r"[«\"]Развлечения[»\"].{0,120}[«\"]Цветы[»\"]", item.text, re.IGNORECASE)
+    return {
+        "bank": item.bank,
+        "status": "review",
+        "reason": "mixed_post_explicit_dated_offer",
+        "source_id": item.source_id,
+        "published_at": item.published_at.isoformat(),
+        "promo_start": purchase_day.isoformat(),
+        "promo_end": purchase_day.isoformat(),
+        "title": f"ВТБ Плюс: {match.group('pct')}% кешбэка на покупки {match.group('day')} {match.group('month')}",
+        "reward": f"{match.group('pct')}% кешбэка",
+        "conditions": (
+            "Для подписчиков ВТБ Плюс; выбрать одну из предложенных категорий. "
+            "Подробные ограничения и условия проверить перед публикацией."
+        ),
+        "source_url": item.url,
+        "source_excerpt": match.group(0) + ((" " + categories.group(0)) if categories else ""),
+    }
 
 
 def reporting_window(now: datetime | None = None):
@@ -55,6 +108,16 @@ def main() -> None:
             result.included = False
             result.reason = rejection
     _mark_duplicates(evaluated)
+
+    # Preserve a traceable review lead if a separate, explicitly dated
+    # banking offer appears inside a composite social post.
+    split_review = []
+    for item in items:
+        lead = explicit_dated_vtb_plus_suboffer(item, start.date())
+        if lead is not None:
+            split_review.append(lead)
+    unique_leads = {row["source_url"] + ":" + row["promo_start"]: row for row in split_review}
+    split_review = list(unique_leads.values())
 
     for item, result in evaluated:
         if not result.included:
@@ -117,7 +180,8 @@ def main() -> None:
         "all_banks": len(BANKS),
         "collected_materials": len(evaluated),
         "algorithm_candidates": sum(1 for _, res in evaluated if res.included),
-        "requires_manual_review": sum(1 for _, res in evaluated if res.reason in REVIEW_REASONS),
+        "requires_manual_review": sum(1 for _, res in evaluated if res.reason in REVIEW_REASONS) + len(split_review),
+        "explicit_dated_suboffers_for_review": len(split_review),
         "source_coverage_confirmed": len(failures) == 0,
         "required_source_failures": failures,
         "by_bank": by_bank,
@@ -148,6 +212,13 @@ def main() -> None:
                 res.promo_end.isoformat() if res.promo_end else "",
                 res.title, res.reward, res.conditions,
                 res.evidence_url or item.url, item.text[:900],
+            ])
+        for lead in split_review:
+            out.writerow([
+                lead["bank"], lead["status"], lead["reason"], lead["source_id"],
+                lead["published_at"], lead["promo_start"], lead["promo_end"],
+                lead["title"], lead["reward"], lead["conditions"],
+                lead["source_url"], lead["source_excerpt"],
             ])
     print(f"Collected: {manifest['collected_materials']}, algorithm candidates: {manifest['algorithm_candidates']}, review: {manifest['requires_manual_review']}.")
     print(f"Required-source failures: {len(failures)}. These do not suppress the diagnostic audit.")
