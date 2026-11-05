@@ -44,7 +44,7 @@ def explicit_dated_vtb_plus_suboffer(item, report_day: date):
         return None
     month_names = "|".join(MONTHS)
     pattern = (
-        rf"подписчик\w*\s+ВТБ\s+Плюс.{0,150}?"
+        rf"подписчик\w*\s+ВТБ\s+Плюс.{{0,150}}?"
         rf"(?P<pct>\d{{1,3}})\s*%\s*(?:кешбэк|кэшбэк)\w*"
         rf"\s+на\s+покупки\s+(?P<day>\d{{1,2}})\s+"
         rf"(?P<month>{month_names})(?:\s+(?P<year>20\d{{2}}))?"
@@ -180,8 +180,9 @@ def main() -> None:
         "all_banks": len(BANKS),
         "collected_materials": len(evaluated),
         "algorithm_candidates": sum(1 for _, res in evaluated if res.included),
-        "requires_manual_review": sum(1 for _, res in evaluated if res.reason in REVIEW_REASONS) + len(split_review),
+        "requires_manual_review": sum(1 for _, res in evaluated if res.reason in REVIEW_REASONS),
         "explicit_dated_suboffers_for_review": len(split_review),
+        "total_review_queue_entries": sum(1 for _, res in evaluated if res.reason in REVIEW_REASONS) + len(split_review),
         "source_coverage_confirmed": len(failures) == 0,
         "required_source_failures": failures,
         "by_bank": by_bank,
