@@ -21,6 +21,46 @@ class DailyPilotTests(unittest.TestCase):
         self.assertEqual((16, 10), (end.hour, end.minute))
         self.assertEqual(14, (daily_pilot.PILOT_END - daily_pilot.PILOT_START).days + 1)
 
+    def test_mixed_vtb_post_yields_one_dated_review_lead(self):
+        text = (
+            "В ноябре у нас кешбэк дня: 50% Чиббис, 45% Яндекс Лавка, "
+            "10% Детский мир, 15% Отелло. Точные даты в приложении. "
+            "А подписчики ВТБ Плюс уже 3 ноября смогут выбрать одну из "
+            "категорий с 7% кешбэка на покупки 4 ноября: "
+            "«Развлечения», «Театры и кино» или «Цветы»."
+        )
+        item = SimpleNamespace(
+            bank="ВТБ", source_type="telegram", source_id="vtb_promos_tg",
+            published_at=datetime(2026, 11, 3, 11, 0, tzinfo=MOSCOW),
+            url="https://t.me/vtbvygoda/2229", text=text,
+        )
+        lead = daily_pilot.explicit_dated_vtb_plus_suboffer(item, date(2026, 11, 4))
+        self.assertIsNotNone(lead)
+        self.assertEqual("2026-11-04", lead["promo_start"])
+        self.assertEqual("2026-11-04", lead["promo_end"])
+        self.assertEqual("7% кешбэка", lead["reward"])
+        self.assertEqual("mixed_post_explicit_dated_offer", lead["reason"])
+        self.assertEqual(item.url, lead["source_url"])
+        self.assertEqual("review", lead["status"])
+        self.assertIsNone(
+            daily_pilot.explicit_dated_vtb_plus_suboffer(item, date(2026, 11, 3))
+        )
+
+    def test_no_invented_start_from_bank_promo_announcement(self):
+        item = SimpleNamespace(
+            bank="ВТБ", source_type="telegram", source_id="vtb_promos_tg",
+            published_at=datetime(2026, 11, 3, 11, 0, tzinfo=MOSCOW),
+            url="https://t.me/vtbvygoda/9999",
+            text="ВТБ Плюс: 50% Чиббис и 45% Яндекс Лавка. Сроки в приложении.",
+        )
+        self.assertIsNone(
+            daily_pilot.explicit_dated_vtb_plus_suboffer(item, date(2026, 11, 4))
+        )
+        item.text = "ВТБ Плюс 7% кешбэка на покупки 4 ноября: категории есть."
+        self.assertIsNone(
+            daily_pilot.explicit_dated_vtb_plus_suboffer(item, date(2026, 11, 4))
+        )
+
     def test_no_network_outside_approved_pilot_dates(self):
         start = datetime(2026, 11, 17, 0, 0, tzinfo=MOSCOW)
         end = datetime(2026, 11, 17, 17, 0, tzinfo=MOSCOW)
