@@ -1,0 +1,70 @@
+name: Publish reviewed Daily Banking 03-05 Nov 2026
+
+on:
+  workflow_dispatch:
+    inputs:
+      approve_publish:
+        description: "Approve exact 6-card Daily Banking digest 03-05 November 2026 for Telegram"
+        type: boolean
+        required: true
+        default: false
+
+concurrency:
+  group: daily-banking-reviewed-2026-11-03-05
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: ${{ inputs.approve_publish }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Telegram transport
+        run: pip install requests==2.32.5
+      - name: Send exact approved message once
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: "-1004291568481"
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          from main import send_telegram
+
+          file = Path("approved_digests/2026-11-03_2026-11-05.html")
+          marker = Path("data/manual_publications/2026-11-03_2026-11-05.sent")
+          sha256 = "cb2eaed8a43f412e0977f1f323f1bf84bb5d4f6a159e57a2393e70120573c7c6"
+          if marker.exists():
+              raise SystemExit("Already published; refusing to send duplicate digest")
+          raw = file.read_bytes()
+          if hashlib.sha256(raw).hexdigest() != sha256:
+              raise SystemExit("Text mismatch: publication blocked")
+          body = raw.decode("utf-8")
+          if not body.startswith("<b>Мониторинг акций Daily Banking</b>"):
+              raise SystemExit("Header mismatch: publication blocked")
+          if body.count("<b>Срок акции</b>") != 6 or body.count(">Источник</a>") != 6:
+              raise SystemExit("Card count mismatch: publication blocked")
+          if len(body) > 3850:
+              raise SystemExit("Telegram message length too large")
+          send_telegram(body)
+          marker.parent.mkdir(parents=True, exist_ok=True)
+          marker.write_text(sha256 + "\n", encoding="utf-8")
+          print("SENT: 6 reviewed Daily Banking promo cards")
+          PY
+      - name: Persist delivery marker
+        run: |
+          git config user.name "gpb-daily-monitor"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/manual_publications/2026-11-03_2026-11-05.sent
+          git commit -m "Record delivery of Daily Banking 03-05 Nov 2026"
+          git push origin HEAD:main
