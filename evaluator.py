@@ -689,6 +689,10 @@ def official_alfa_rule_campaign_period(text: str) -> tuple[date, date] | None:
         text, re.IGNORECASE,
     ):
         excerpt = text[match.end():match.end() + 100]
+        # PDF without an explicit campaign year must go to review, not
+        # silently inherit the year of the current monitoring run.
+        if not re.search(r"\b20\d{2}\b", excerpt):
+            continue
         period = extract_period(excerpt, date(2026, 1, 1))
         if period:
             return period
