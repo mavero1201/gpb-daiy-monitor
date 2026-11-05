@@ -1,0 +1,74 @@
+name: One-time approved Daily Banking 03-05 Nov (assistant-authorized trigger)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - publication_approvals/2026-11-03_2026-11-05.json
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-on-approval-daily-banking-2026-11-03
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exactly approved revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Telegram transport
+        run: pip install requests==2.32.5
+      - name: Validate exact approved digest and send once
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: "-1004291568481"
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          from main import send_telegram
+
+          approval_file = Path("publication_approvals/2026-11-03_2026-11-05.json")
+          digest_file = Path("approved_digests/2026-11-03_2026-11-05.html")
+          marker = Path("data/manual_publications/2026-11-03_2026-11-05.sent")
+          pinned_sha = "cb2eaed8a43f412e0977f1f323f1bf84bb5d4f6a159e57a2393e70120573c7c6"
+
+          if marker.exists():
+              raise SystemExit("Duplicate prevented: already sent")
+          approval = json.loads(approval_file.read_text(encoding="utf-8"))
+          if approval.get("approved") is not True or approval.get("sha256") != pinned_sha:
+              raise SystemExit("Missing valid user authorization for exact digest")
+          raw = digest_file.read_bytes()
+          if hashlib.sha256(raw).hexdigest() != pinned_sha:
+              raise SystemExit("Digest changed after authorization")
+          digest = raw.decode("utf-8")
+          if not digest.startswith("<b>Мониторинг акций Daily Banking</b>"):
+              raise SystemExit("Invalid digest header")
+          if digest.count("<b>Срок акции</b>") != 6 or digest.count(">Источник</a>") != 6:
+              raise SystemExit("Digest incomplete or unexpected number of cards")
+          if len(digest) > 3800:
+              raise SystemExit("Digest exceeds a single Telegram message")
+          send_telegram(digest)
+          marker.parent.mkdir(parents=True, exist_ok=True)
+          marker.write_text(pinned_sha + "\n", encoding="utf-8")
+          print("SUCCESS: approved 6-card Daily Banking digest sent to Telegram")
+          PY
+      - name: Record publication and prevent duplicate delivery
+        run: |
+          git config user.name "gpb-daily-monitor"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/manual_publications/2026-11-03_2026-11-05.sent
+          git commit -m "Record confirmed Telegram publication 03-05 November 2026"
+          git push origin HEAD:main
