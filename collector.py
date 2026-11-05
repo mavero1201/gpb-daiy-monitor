@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from html import unescape
 from io import BytesIO
@@ -64,6 +64,7 @@ class SourceCheck:
     required: bool = True
     item_count: int = 0
     error: str = ""
+    catalog_launch_hints: list[dict] = field(default_factory=list)
 
 
 def previous_calendar_week(now: datetime | None = None) -> tuple[datetime, datetime]:
@@ -516,6 +517,27 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
         ) else 1
     )
     exhausted_limit = len(candidate_urls) > link_limit
+
+    # Cheap complete-index audit: collect explicitly dated campaign leads from
+    # every link in the official catalogue, including those beyond the 35
+    # documents that can be opened under the request/time budget. This is a
+    # DISCOVERY INDEX ONLY: labels are not verified rules, never publish them.
+    lookback = start.date() - timedelta(days=7)
+    horizon = end.date() + timedelta(days=7)
+    chosen_links = set(candidate_urls[:link_limit])
+    dated_catalog_leads = []
+    for link in candidate_urls:
+        hint = candidate_hints.get(link, "")
+        launch = _catalog_launch_date_hint(hint)
+        if launch is None or not (lookback <= launch <= horizon):
+            continue
+        dated_catalog_leads.append({
+            "url": link,
+            "catalog_text": hint[:450],
+            "start_hint": launch.isoformat(),
+            "document_fetched": link in chosen_links,
+        })
+
     fetch_errors = 0
     for url in candidate_urls[:link_limit]:
         if url in seen_urls:
@@ -593,6 +615,7 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
         required=required,
         item_count=len(items),
         error=error,
+        catalog_launch_hints=dated_catalog_leads,
     )
 
 
