@@ -84,7 +84,32 @@ def main() -> None:
             ],
         }
 
+    # Preserve leads from the full official rules index, not just the first
+    # 35 downloaded documents. A dated catalogue label is a lead for checking,
+    # NEVER a verified campaign period or a Telegram-ready card.
+    catalog_leads = [
+        (c.bank, c.source_id, lead)
+        for c in checks
+        for lead in c.catalog_launch_hints
+    ]
+    catalog_file = ARTIFACT_DIR / f"daily_catalog_leads_{key}.csv"
+    with catalog_file.open("w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.writer(file, delimiter=";")
+        writer.writerow([
+            "bank", "source_id", "catalog_start_hint",
+            "document_fetched", "source_url", "catalog_text",
+        ])
+        for bank, source_id, lead in catalog_leads:
+            writer.writerow([
+                bank, source_id, lead["start_hint"], lead["document_fetched"],
+                lead["url"], lead["catalog_text"],
+            ])
+
     manifest = {
+        "catalog_index_date_leads": len(catalog_leads),
+        "catalog_index_unfetched_leads": sum(
+            not lead["document_fetched"] for _, _, lead in catalog_leads
+        ),
         "pilot_window": [PILOT_START.isoformat(), PILOT_END.isoformat()],
         "audit_date": end.date().isoformat(),
         "audit_time_moscow": end.isoformat(),
@@ -126,7 +151,8 @@ def main() -> None:
             ])
     print(f"Collected: {manifest['collected_materials']}, algorithm candidates: {manifest['algorithm_candidates']}, review: {manifest['requires_manual_review']}.")
     print(f"Required-source failures: {len(failures)}. These do not suppress the diagnostic audit.")
-    print(f"Reports: {report_path}, {queue_path}")
+    print(f"Catalogue leads (index only): {len(catalog_leads)}; not fetched: {manifest['catalog_index_unfetched_leads']}.")
+    print(f"Reports: {report_path}, {queue_path}, {catalog_file}")
     print("PILOT ONLY: no messages sent to Telegram.")
 
 
