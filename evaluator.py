@@ -676,6 +676,25 @@ def classify_mechanic(post_text: str) -> str:
     return "промо-механика"
 
 
+def official_alfa_rule_campaign_period(text: str) -> tuple[date, date] | None:
+    """Prefer the explicitly declared campaign period in official Alfa rules.
+
+    A reporting, qualifying or participation subperiod MUST NOT silently
+    become the campaign start. Do not infer dates from unrelated PDF examples.
+    """
+    if not tidy(text).lower().startswith(("правила проведения акции", "правила акции")):
+        return None
+    for match in re.finditer(
+        r"Период\s+проведения\s+Акции\s*[–—-]\s*",
+        text, re.IGNORECASE,
+    ):
+        excerpt = text[match.end():match.end() + 100]
+        period = extract_period(excerpt, date(2026, 1, 1))
+        if period:
+            return period
+    return None
+
+
 def evaluate(item: RawItem) -> Evaluation:
     post_low = item.text.lower()
 
@@ -716,8 +735,15 @@ def evaluate(item: RawItem) -> Evaluation:
     # Если отсутствует дата публикации, для периода требуется явный год.
     reference_date = item.published_at.date() if item.published_at else date.today()
     explicit_year = bool(re.search(r"\b20\d{2}\b", item.text))
+    is_official_alfa_rules = (
+        item.bank == "Альфа-Банк"
+        and item.source_type == "web"
+        and tidy(item.text).lower().startswith(("правила проведения акции", "правила акции"))
+    )
     period = (
-        extract_period(item.text, reference_date)
+        official_alfa_rule_campaign_period(item.text)
+        if is_official_alfa_rules
+        else extract_period(item.text, reference_date)
         if item.published_at is not None or explicit_year
         else None
     )
@@ -725,7 +751,7 @@ def evaluate(item: RawItem) -> Evaluation:
         period = extract_single_day_event(item.text, reference_date)
 
     # Do not infer a period from the post date or a deadline alone.
-    if not period:
+    if not period and not is_official_alfa_rules:
         period, evidence, evidence_url = recheck_exact_period(
             item, evidence, evidence_url,
         )
