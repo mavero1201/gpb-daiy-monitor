@@ -1,0 +1,73 @@
+name: Publish approved Daily Banking weekly addendum 02-08 Nov 2026
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - publication_approvals/2026-11-02_2026-11-08_addendum.json
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-on-approval-daily-banking-2026-11-02-week
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout authorized revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Telegram transport
+        run: pip install requests==2.32.5
+      - name: Send vetted weekly addendum once
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: "-1004291568481"
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          from main import send_telegram
+
+          approval_file = Path("publication_approvals/2026-11-02_2026-11-08_addendum.json")
+          digest_file = Path("approved_digests/2026-11-02_2026-11-08_addendum.html")
+          marker = Path("data/manual_publications/2026-11-02_2026-11-08_addendum.sent")
+          pinned_sha = "e741b59515a356345719bb3d1e1b7503690f547985b05c8d6a2d1af197916580"
+          if marker.exists():
+              raise SystemExit("Already sent; no duplicate allowed")
+          approval = json.loads(approval_file.read_text(encoding="utf-8"))
+          if approval.get("approved") is not True or approval.get("sha256") != pinned_sha:
+              raise SystemExit("No authorization for exact weekly addendum")
+          raw = digest_file.read_bytes()
+          if hashlib.sha256(raw).hexdigest() != pinned_sha:
+              raise SystemExit("Weekly addendum changed after approval")
+          body = raw.decode("utf-8")
+          if not body.startswith("📌 <b>Мониторинг банковских акций Daily Banking</b>"):
+              raise SystemExit("Unexpected title")
+          if body.count("<b>Срок акции:</b>") != 3 or body.count("<b>Источник:</b>") != 3:
+              raise SystemExit("Expected exactly 3 vetted new offer cards")
+          if len(body) > 3900:
+              raise SystemExit("Message too long for Telegram")
+          send_telegram(body)
+          marker.parent.mkdir(parents=True, exist_ok=True)
+          marker.write_text(pinned_sha + "\n", encoding="utf-8")
+          print("SENT weekly addendum for 02-08 November: 3 new cards, 6 earlier cards not duplicated")
+          PY
+      - name: Persist delivery marker
+        run: |
+          git config user.name "gpb-daily-monitor"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/manual_publications/2026-11-02_2026-11-08_addendum.sent
+          git commit -m "Record Telegram delivery of Daily Banking 02-08 Nov weekly addendum"
+          git push origin HEAD:main
