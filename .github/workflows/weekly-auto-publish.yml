@@ -82,7 +82,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: "-1004291568481"
-          AUTO_PUBLISH_TO_TELEGRAM: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false) && '1' || '0' }}
+          AUTO_PUBLISH_TO_TELEGRAM: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)) && '1' || '0' }}
         run: python engine/weekly_auto_publish.py
 
       - name: Retain source coverage, rejection journal and exact publication preview
