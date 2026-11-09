@@ -1,0 +1,12 @@
+{
+  "approved": true,
+  "sha256": "e741b59515a356345719bb3d1e1b7503690f547985b05c8d6a2d1af197916580",
+  "digest": "approved_digests/2026-11-02_2026-11-08_addendum.html",
+  "week_start": "2026-11-02",
+  "week_end": "2026-11-08",
+  "card_count": 3,
+  "target": "ДКМ_Мониторинг_акций_DAILY",
+  "authorized_by": "user request in ChatGPT: Отправь за пр неделю пожалуйста",
+  "note": "Three newly vetted offers; six prior-Nov-05 cards excluded to prevent duplicate posting",
+  "publication_mode": "one_time"
+}
