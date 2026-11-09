@@ -1,10 +1,10 @@
-name: Weekly Daily Banking monitor
+name: Legacy Daily Banking audit (manual preview only)
 
 on:
   workflow_dispatch:
     inputs:
       publish_to_telegram:
-        description: "Публиковать в Telegram (только после проверки предпросмотра)"
+        description: "Устаревший параметр. Эта задача только для предпросмотра, без публикации"
         type: boolean
         required: false
         default: false
@@ -13,13 +13,6 @@ on:
         type: boolean
         required: false
         default: false
-  schedule:
-    # Primary: 09:07 Moscow = 06:07 UTC.
-    # Backup: 10:10 Moscow = 07:10 UTC.
-    # The backup exits without publishing if the primary run already succeeded.
-    - cron: "7 6 * * 1"
-    - cron: "10 7 * * 1"
-
 concurrency:
   group: weekly-daily-banking-monitor
   cancel-in-progress: false
@@ -51,7 +44,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: "-1004291568481"
           STRICT_SOURCES: "1"
-          PUBLISH_TO_TELEGRAM: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_to_telegram && '1' || '0' }}
+          PUBLISH_TO_TELEGRAM: '0'
           REPUBLISH_WEEK: ${{ inputs.republish_week && '1' || '0' }}
           FORCE_RUN: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: python preview.py
