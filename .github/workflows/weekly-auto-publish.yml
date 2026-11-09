@@ -33,7 +33,7 @@ jobs:
       - name: Checkout safe-tested monitor engine
         uses: actions/checkout@v4
         with:
-          ref: fix/quality-recall-2026-10-26
+          ref: cd1b9a7b1a5a10ee136ef749ad4707a5dea8ae8f
           persist-credentials: false
       - name: Python 3.12
         uses: actions/setup-python@v5
@@ -57,7 +57,7 @@ jobs:
       - name: Checkout verified modern collector separately
         uses: actions/checkout@v4
         with:
-          ref: fix/quality-recall-2026-10-26
+          ref: cd1b9a7b1a5a10ee136ef749ad4707a5dea8ae8f
           path: engine
           persist-credentials: false
 
