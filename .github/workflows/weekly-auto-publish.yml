@@ -1,0 +1,95 @@
+name: Automatic Monday Daily Banking Telegram digest
+
+on:
+  # Report is always the PREVIOUS Monday-Sunday week in Moscow.
+  schedule:
+    # Main attempt 09:07 MSK; backup at 10:10 MSK (UTC+3 year-round).
+    - cron: "7 6 * * 1"
+    - cron: "10 7 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only build and audit, do NOT send Telegram"
+        type: boolean
+        required: true
+        default: true
+  push:
+    paths:
+      - ".github/workflows/weekly-auto-publish.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: weekly-auto-daily-banking
+  cancel-in-progress: false
+
+jobs:
+  installation-smoke:
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout safe-tested monitor engine
+        uses: actions/checkout@v4
+        with:
+          ref: fix/quality-recall-2026-10-26
+          persist-credentials: false
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Regression tests without Telegram publication
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+
+  publish:
+    if: ${{ github.event_name != 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    steps:
+      - name: Checkout default branch with persisted publication markers
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Checkout verified modern collector separately
+        uses: actions/checkout@v4
+        with:
+          ref: fix/quality-recall-2026-10-26
+          path: engine
+          persist-credentials: false
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r engine/requirements.txt
+
+      - name: Validate collector and publisher rules
+        working-directory: engine
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: Configure Git delivery-log identity
+        run: |
+          git config user.name "gpb-daily-monitor"
+          git config user.email "actions@users.noreply.github.com"
+
+      - name: Build previous-week digest and send only evidence-verified new offers
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: "-1004291568481"
+          AUTO_PUBLISH_TO_TELEGRAM: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false) && '1' || '0' }}
+        run: python engine/weekly_auto_publish.py
+
+      - name: Retain source coverage, rejection journal and exact publication preview
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-auto-daily-banking-${{ github.run_number }}
+          path: artifacts/
+          retention-days: 90
+          if-no-files-found: ignore
