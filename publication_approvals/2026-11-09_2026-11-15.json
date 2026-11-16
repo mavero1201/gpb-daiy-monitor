@@ -1,0 +1,15 @@
+{
+  "approved": true,
+  "week_start": "2026-11-09",
+  "week_end": "2026-11-15",
+  "card_count": 7,
+  "parts": 2,
+  "sha256": [
+    "7134d237067d9df37d66e8e607f510eae5d71514e2e9be5468dfb431e5388349",
+    "b81c57a6bea828f48e62e8b77b714b83cebc7fecfc722c640774ad5198ba33c5"
+  ],
+  "target": "ДКМ_Мониторинг_акций_DAILY",
+  "authorized_by": "User explicitly requested manual previous-week Daily Banking digest in ChatGPT",
+  "publication_mode": "single_authorized_delivery",
+  "note": "7 launch-week offers, official bank sources, previously delivered weeks excluded"
+}
