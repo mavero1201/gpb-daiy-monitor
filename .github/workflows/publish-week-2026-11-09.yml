@@ -1,0 +1,85 @@
+name: Publish manually reviewed Daily Banking 09-15 Nov 2026
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - publication_approvals/2026-11-09_2026-11-15.json
+
+permissions:
+  contents: write
+
+concurrency:
+  group: one-time-reviewed-daily-banking-2026-11-09
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout current main with publication history
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Use Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Telegram transport
+        run: pip install requests==2.32.5
+      - name: Publish verified parts and record each delivery
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: "-1004291568481"
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import subprocess
+          from pathlib import Path
+          from main import send_telegram
+
+          base = "2026-11-09_2026-11-15"
+          expected = [
+              "7134d237067d9df37d66e8e607f510eae5d71514e2e9be5468dfb431e5388349",
+              "b81c57a6bea828f48e62e8b77b714b83cebc7fecfc722c640774ad5198ba33c5",
+          ]
+          approval = json.loads(Path(f"publication_approvals/{base}.json").read_text(encoding="utf-8"))
+          if approval.get("approved") is not True or approval.get("sha256") != expected:
+              raise SystemExit("Missing or mismatched specific authorization")
+          files = [Path(f"approved_digests/{base}_part{i}.html") for i in (1, 2)]
+          texts = []
+          for i, path in enumerate(files):
+              raw = path.read_bytes()
+              if hashlib.sha256(raw).hexdigest() != expected[i]:
+                  raise SystemExit(f"Approved text mismatch in part {i+1}")
+              body = raw.decode("utf-8")
+              if not body.startswith("📌 <b>Мониторинг банковских акций Daily Banking</b>"):
+                  raise SystemExit("Unrecognized heading")
+              if body.count("<b>Срок акции:</b>") != (6 if i == 0 else 1):
+                  raise SystemExit("Card count mismatch")
+              if len(body) > 3900:
+                  raise SystemExit("Telegram message length unsafe")
+              texts.append(body)
+
+          subprocess.run(["git", "config", "user.name", "gpb-daily-monitor"], check=True)
+          subprocess.run(["git", "config", "user.email", "actions@users.noreply.github.com"], check=True)
+          for i, body in enumerate(texts, 1):
+              marker = Path(f"data/manual_publications/{base}_part{i}.sent")
+              if marker.exists():
+                  if marker.read_text(encoding="utf-8").strip() != expected[i-1]:
+                      raise SystemExit("Unknown existing delivery marker")
+                  print(f"PART {i}: already delivered, skipping")
+                  continue
+              send_telegram(body)
+              marker.parent.mkdir(parents=True, exist_ok=True)
+              marker.write_text(expected[i-1] + "\n", encoding="utf-8")
+              subprocess.run(["git", "add", str(marker)], check=True)
+              subprocess.run(["git", "commit", "-m", f"Record Telegram delivery {base} part {i}"], check=True)
+              subprocess.run(["git", "push", "origin", "HEAD:main"], check=True)
+              print(f"PART {i}: Telegram delivery confirmed and persisted")
+
+          print("WEEKLY REVIEWED DIGEST: two parts processed")
+          PY
