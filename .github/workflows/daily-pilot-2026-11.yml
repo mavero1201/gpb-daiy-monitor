@@ -1,12 +1,7 @@
-name: Daily Banking pilot - read only (10 AM and 5 PM Moscow)
+name: Daily Banking historical pilot - manual read-only
 
 on:
   workflow_dispatch:
-  schedule:
-    # UTC: 07:00 and 14:00 = Moscow 10:00 and 17:00.
-    # Python pilot enforces 03-16 Nov 2026 inclusive.
-    - cron: "0 7 * * *"
-    - cron: "0 14 * * *"
 
 concurrency:
   group: daily-banking-pilot-2026-11
