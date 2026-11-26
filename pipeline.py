@@ -242,6 +242,35 @@ def write_audit(start, end, evaluated, source_checks):
                     entry.get("source_text_excerpt", ""),
                 ])
 
+    # Stable weekly input for Sabina's monthly report. Unlike the Telegram
+    # message, this file preserves a machine-readable campaign identity and
+    # NEVER labels an evaluated candidate as already delivered.
+    week_registry_path = ARTIFACT_DIR / f"weekly_campaign_registry_{period_key}.csv"
+    with week_registry_path.open("w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.writer(f, delimiter=";")
+        writer.writerow([
+            "campaign_id", "start_week", "end_week", "bank", "campaign_name",
+            "campaign_start", "campaign_end", "source_publication_date",
+            "reward", "conditions", "mechanic", "goal",
+            "source_url", "source_id", "review_status",
+        ])
+        for item, result in evaluated:
+            if not result.included or not result.promo_start:
+                continue
+            if not (start.date() <= result.promo_start <= end.date()):
+                continue
+            writer.writerow([
+                promo_id(item, result),
+                start.date().isoformat(), end.date().isoformat(),
+                item.bank, result.title,
+                result.promo_start.isoformat(),
+                result.promo_end.isoformat() if result.promo_end else "",
+                item.published_at.date().isoformat() if item.published_at else "",
+                result.reward, result.conditions, result.mechanic,
+                result.goal, result.evidence_url or item.url,
+                item.source_id, "eligible_not_delivery_confirmed",
+            ])
+
     review_reasons = {
         "no_exact_period_after_recheck", "quality_unstructured_card",
         "quality_irrelevant_text", "quality_mechanic_mismatch",
@@ -326,4 +355,4 @@ def write_audit(start, end, evaluated, source_checks):
         encoding="utf-8",
     )
 
-    return [item_path, source_path, summary_path, review_path, raw_path, catalog_path]
+    return [item_path, source_path, summary_path, review_path, raw_path, catalog_path, week_registry_path]
