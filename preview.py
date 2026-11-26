@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from main import send_telegram
+from review_report import write_review_report
 from collector import previous_calendar_week
 from pipeline import (
     load_state,
@@ -60,6 +61,21 @@ def main() -> None:
     ) = run_pipeline(republish_current_week=republish)
 
     write_audit(start, end, evaluated, source_checks)
+    audit_dir = Path('artifacts')
+    period_key = f'{start:%Y-%m-%d}_{end:%Y-%m-%d}'
+    if (audit_dir / f'review_queue_{period_key}.csv').is_file() and (audit_dir / f'audit_sources_{period_key}.csv').is_file():
+        report_path = write_review_report(audit_dir, start.date(), end.date())
+        print(f'REVIEW REPORT: {report_path}')
+    review_count = sum(1 for _, result in evaluated if result.reason in {
+        "no_exact_period_after_recheck", "quality_unstructured_card",
+        "quality_irrelevant_text", "quality_mechanic_mismatch",
+        "quality_unverified_reward", "quality_unknown_mechanic",
+        "quality_no_bank_product_link", "quality_single_day_requires_review",
+        "quality_missing_required_field", "quality_invalid_source",
+        "no_reward", "no_conditions",
+        "deadline_only_needs_start", "activity_month_only_needs_terms",
+        "multiple_offers_require_split",
+    })
 
     strict_sources = os.getenv("STRICT_SOURCES") == "1"
     coverage_failures = strict_coverage_failures(source_checks)
@@ -103,6 +119,9 @@ def main() -> None:
             + ", ".join(escape(bank) for bank in no_actions)
             + ".</i>"
         )
+
+    if review_count and os.getenv("PUBLISH_TO_TELEGRAM") != "1":
+        blocks.append(f"<i>Требуют дополнительной проверки: {review_count}. См. review_queue в архиве запуска. Это не означает отсутствие акций.</i>")
 
     if len(blocks) == 2:
         blocks.append("Нет предложений, прошедших проверку для публикации.")

@@ -122,31 +122,30 @@ def run_pipeline(republish_current_week: bool = False):
             continue
 
         pid = promo_id(item, result)
-        if pid in sent and not (republish_current_week and start.date() <= item.published_at.date() <= end.date()):
+        if pid in sent and not (republish_current_week and result.promo_start is not None and start.date() <= result.promo_start <= end.date()):
             result.included = False
             result.reason = "already_published"
             continue
 
-        publication_day = item.published_at.date()
-
-        if start.date() <= publication_day <= end.date():
-            publish_items.append((item, result, pid, False))
+        # Правило выпуска: учитываем ПЕРВЫЙ ДЕНЬ участия, а не день
+        # публикации сообщения / документа и не факт действия на неделе.
+        # Повторный сбор старых публикаций не создаёт новое предложение.
+        if result.promo_start is None or result.promo_end is None:
+            result.included = False
+            result.reason = "missing_verified_campaign_period"
             continue
 
-        # Всегда перепроверяем ровно одну предыдущую календарную неделю,
-        # если у мониторинга уже есть история публикаций. Это позволяет
-        # подхватить акцию, которую прошлый выпуск не смог подтвердить,
-        # даже если после этого уже был опубликован пустой текущий выпуск.
-        if (
-            has_publication_history
-            and not republish_current_week
-            and recovery_start <= publication_day <= recovery_end
-        ):
-            recovered_items.append((item, result, pid, True))
+        if not (start.date() <= result.promo_start <= end.date()):
+            result.included = False
+            result.reason = "outside_launch_week"
             continue
 
-        result.included = False
-        result.reason = "outside_current_or_recovery_period"
+        if result.promo_end < result.promo_start:
+            result.included = False
+            result.reason = "invalid_campaign_period"
+            continue
+
+        publish_items.append((item, result, pid, False))
 
     return start, end, evaluated, source_checks, publish_items, recovered_items, state
 
@@ -158,7 +157,7 @@ def update_state_after_publish(state: dict, start, end, published_items) -> dict
         sent[pid] = {
             "bank": item.bank,
             "title": result.title,
-            "publication_date": item.published_at.date().isoformat(),
+            "publication_date": item.published_at.date().isoformat() if item.published_at else None,
             "promo_start": result.promo_start.isoformat() if result.promo_start else None,
             "promo_end": result.promo_end.isoformat() if result.promo_end else None,
             "source_url": result.evidence_url or item.url,
@@ -186,13 +185,43 @@ def write_audit(start, end, evaluated, source_checks):
                 item.bank,
                 item.source_id,
                 item.source_type,
-                item.published_at.isoformat(),
+                item.published_at.isoformat() if item.published_at else "",
                 item.url,
                 result.included,
                 result.reason,
                 result.promo_start.isoformat() if result.promo_start else "",
                 result.promo_end.isoformat() if result.promo_end else "",
                 result.title,
+            ])
+
+    review_reasons = {
+        "no_exact_period_after_recheck", "quality_unstructured_card",
+        "quality_irrelevant_text", "quality_mechanic_mismatch",
+        "quality_unverified_reward", "quality_unknown_mechanic",
+        "quality_no_bank_product_link", "quality_single_day_requires_review",
+        "quality_missing_required_field", "quality_invalid_source",
+        "no_reward", "no_conditions",
+        "deadline_only_needs_start", "activity_month_only_needs_terms",
+        "multiple_offers_require_split",
+    }
+    review_path = ARTIFACT_DIR / f"review_queue_{period_key}.csv"
+    with review_path.open("w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.writer(f, delimiter=";")
+        writer.writerow(["bank", "source_id", "published_at", "url", "reason",
+                         "title", "reward", "conditions", "mechanic",
+                         "promo_start", "promo_end", "date_status",
+                         "date_evidence", "evidence_url", "source_text"])
+        for item, result in evaluated:
+            if result.reason not in review_reasons:
+                continue
+            writer.writerow([
+                item.bank, item.source_id, item.published_at.isoformat() if item.published_at else "",
+                item.url, result.reason, result.title, result.reward,
+                result.conditions, result.mechanic,
+                result.promo_start.isoformat() if result.promo_start else "",
+                result.promo_end.isoformat() if result.promo_end else "",
+                result.date_status, result.date_evidence,
+                result.evidence_url, item.text,
             ])
 
     source_path = ARTIFACT_DIR / f"audit_sources_{period_key}.csv"
@@ -240,6 +269,7 @@ def write_audit(start, end, evaluated, source_checks):
                 "period_end": end.date().isoformat(),
                 "raw_items": len(evaluated),
                 "included": sum(1 for _, r in evaluated if r.included),
+                "requires_review": sum(1 for _, r in evaluated if r.reason in review_reasons),
                 "banks": summary,
             },
             ensure_ascii=False,
@@ -248,4 +278,4 @@ def write_audit(start, end, evaluated, source_checks):
         encoding="utf-8",
     )
 
-    return [item_path, source_path, summary_path]
+    return [item_path, source_path, summary_path, review_path]

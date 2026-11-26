@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from html import unescape
 from io import BytesIO
@@ -48,7 +48,7 @@ class RawItem:
     bank: str
     source_id: str
     source_type: str
-    published_at: datetime
+    published_at: datetime | None
     text: str
     url: str
     external_links: list[str]
@@ -64,6 +64,7 @@ class SourceCheck:
     required: bool = True
     item_count: int = 0
     error: str = ""
+    catalog_launch_hints: list[dict] = field(default_factory=list)
 
 
 def previous_calendar_week(now: datetime | None = None) -> tuple[datetime, datetime]:
@@ -90,6 +91,7 @@ def fetch_telegram_source(bank: str, source: dict, start: datetime, end: datetim
     seen_urls: set[str] = set()
     seen_page_markers: set[int] = set()
     required = source.get("required", True)
+    completed_scan = False
 
     for _ in range(20):
         try:
@@ -114,6 +116,7 @@ def fetch_telegram_source(bank: str, source: dict, start: datetime, end: datetim
         soup = BeautifulSoup(response.text, "html.parser")
         wraps = soup.select(".tgme_widget_message_wrap")
         if not wraps:
+            completed_scan = True
             break
 
         oldest_seen: datetime | None = None
@@ -177,8 +180,10 @@ def fetch_telegram_source(bank: str, source: dict, start: datetime, end: datetim
             )
 
         if oldest_seen and oldest_seen <= start:
+            completed_scan = True
             break
         if not message_ids:
+            completed_scan = True
             break
 
         before_id = min(message_ids)
@@ -192,9 +197,10 @@ def fetch_telegram_source(bank: str, source: dict, start: datetime, end: datetim
         source_id=source["id"],
         source_type="telegram",
         source_value=channel,
-        status="ok",
+        status="ok" if completed_scan else "limited",
         required=required,
         item_count=len(items),
+        error="" if completed_scan else "Telegram pagination limit or stalled cursor before reaching scan start",
     )
 
 
@@ -208,9 +214,57 @@ def _same_domain(url: str, root_url: str) -> bool:
     return _base_domain(url) == _base_domain(root_url)
 
 
+def _allowed_catalog_link(url: str, root_url: str) -> bool:
+    """Follow the bank site and explicitly approved official document CDN only."""
+    if _same_domain(url, root_url):
+        return True
+    source_host = (urlparse(root_url).hostname or "").lower()
+    target_host = (urlparse(url).hostname or "").lower()
+    return (
+        source_host in ("alfabank.ru", "www.alfabank.ru")
+        and target_host == "alfabank.servicecdn.ru"
+    )
+
+
 def _looks_like_candidate_link(label: str, href: str) -> bool:
     value = f"{label} {href}".lower()
-    return any(x in value for x in PROMO_HINTS) and any(x in value for x in BANKING_HINTS + ("акци", "promo"))
+    label_low = label.lower()
+    if any(x in value for x in ("privacy", "политика конфиденциальности")):
+        return False
+    if any(x in label_low for x in PROMO_HINTS):
+        return True
+    if any(x in value for x in ("правила акции", "условия акции", "/promo/", "/actions/")):
+        return True
+    # A PDF alone is not a promotion. Otherwise bank tariffs, privacy
+    # policies and shareholder documents dominate the review queue.
+    if href.lower().split("?")[0].endswith(".pdf"):
+        return any(x in label_low for x in ("халв", "лояльност", "промо"))
+    return False
+
+
+def _catalog_launch_date_hint(value: str):
+    """An explicit catalogue label date is for ranking, NEVER proof of inclusion."""
+    numeric = re.search(
+        r"\b(?:с\s*)?(\d{1,2})[./](\d{1,2})[./](20\d{2})\b",
+        value, re.IGNORECASE,
+    )
+    if numeric:
+        day, month, year = map(int, numeric.groups())
+        try:
+            return datetime(year, month, day).date()
+        except ValueError:
+            return None
+    month_names = "|".join(MONTHS)
+    words = re.search(
+        rf'\bс\s*[«"„]?(\d{{1,2}})[»"]?\s+({month_names})\s+(20\d{{2}})\b',
+        value, re.IGNORECASE,
+    )
+    if words:
+        try:
+            return datetime(int(words.group(3)), MONTHS[words.group(2).lower()], int(words.group(1))).date()
+        except ValueError:
+            return None
+    return None
 
 
 def _parse_datetime_value(value: str) -> datetime | None:
@@ -422,6 +476,7 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
         )
 
     candidate_urls: list[str] = []
+    candidate_hints: dict[str, str] = {}
 
     if root_soup is not None:
         for a in root_soup.select("a[href]"):
@@ -429,23 +484,62 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
             if not href or href.startswith(("mailto:", "tel:", "javascript:", "#")):
                 continue
             absolute = urljoin(final_root, href)
-            if not _same_domain(absolute, final_root):
+            if not _allowed_catalog_link(absolute, final_root):
                 continue
             label = clean_text(a.get_text(" ", strip=True))
             if _looks_like_candidate_link(label, absolute) and absolute not in candidate_urls:
                 candidate_urls.append(absolute)
+                parent_text = clean_text(a.parent.get_text(" ", strip=True)) if a.parent else ""
+                candidate_hints[absolute] = parent_text if len(parent_text) <= 700 else label
     else:
         # Jina Reader возвращает Markdown. Извлекаем ссылки из него и
         # продолжаем обход официальных карточек/правил банка.
-        for label, href in re.findall(r"\[([^\]]*)\]\((https?://[^)\s]+)\)", root_text):
+        for match in re.finditer(r"\[([^\]]*)\]\((https?://[^)\s]+)\)", root_text):
+            label, href = match.groups()
             href = href.rstrip(".,;")
-            if not _same_domain(href, final_root):
+            if not _allowed_catalog_link(href, final_root):
                 continue
             if _looks_like_candidate_link(clean_text(label), href) and href not in candidate_urls:
                 candidate_urls.append(href)
+                candidate_hints[href] = root_text[max(0, match.start() - 50):match.end() + 250]
 
-    # Ограничиваем обход, чтобы один тяжёлый сайт не блокировал недельный выпуск.
-    for url in candidate_urls[:35]:
+    # Каталоги просматриваются независимо от даты публикации. На карточке
+    # акции дата может отсутствовать; её период проверяется позднее по правилам.
+    # Срез в 35 ссылок не может служить доказательством полного охвата.
+    link_limit = 35
+    # Date-labelled entries of the reporting week come first, not the
+    # first 35 historical PDFs on a large rules page.
+    reporting_monday = end.date() - timedelta(days=6)
+    candidate_urls.sort(
+        key=lambda url: 0 if (
+            (date_hint := _catalog_launch_date_hint(candidate_hints.get(url, "")))
+            and reporting_monday <= date_hint <= end.date()
+        ) else 1
+    )
+    exhausted_limit = len(candidate_urls) > link_limit
+
+    # Cheap complete-index audit: collect explicitly dated campaign leads from
+    # every link in the official catalogue, including those beyond the 35
+    # documents that can be opened under the request/time budget. This is a
+    # DISCOVERY INDEX ONLY: labels are not verified rules, never publish them.
+    lookback = start.date() - timedelta(days=7)
+    horizon = end.date() + timedelta(days=7)
+    chosen_links = set(candidate_urls[:link_limit])
+    dated_catalog_leads = []
+    for link in candidate_urls:
+        hint = candidate_hints.get(link, "")
+        launch = _catalog_launch_date_hint(hint)
+        if launch is None or not (lookback <= launch <= horizon):
+            continue
+        dated_catalog_leads.append({
+            "url": link,
+            "catalog_text": hint[:450],
+            "start_hint": launch.isoformat(),
+            "document_fetched": link in chosen_links,
+        })
+
+    fetch_errors = 0
+    for url in candidate_urls[:link_limit]:
         if url in seen_urls:
             continue
         seen_urls.add(url)
@@ -453,9 +547,11 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
         try:
             text, soup, final_url = _fetch_document(url)
         except Exception:
+            fetch_errors += 1
             continue
 
         if len(text) < 100:
+            fetch_errors += 1
             continue
 
         low = text.lower()
@@ -475,9 +571,9 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
             )
             published = _parse_datetime_value(explicit.group(1)) if explicit else _parse_datetime_value(final_url)
 
-        if not published or not (start <= published <= end):
-            continue
-
+        # Сроки акции определяет evaluator. published_at=None честно
+        # обозначает отсутствие подтверждённой даты публикации на сайте.
+        # НЕ заменяем эту дату временем сканирования или началом недели.
         links = []
         if soup is not None:
             for a in soup.select("a[href]"):
@@ -499,19 +595,34 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
             )
         )
 
+    # Даже HTTP 200 и извлечённые карточки не означают полного охвата.
+    # Ошибки части карточек и ограничение обхода считаются неполной проверкой.
+    if exhausted_limit or fetch_errors:
+        status = "limited"
+        error = f"Catalog traversal incomplete: {fetch_errors} failed pages; {len(candidate_urls)} links (cap {link_limit})"
+    elif not items:
+        status = "unverified_zero"
+        error = "No campaign candidates extracted; coverage cannot be certified"
+    else:
+        status = "ok"
+        error = ""
     return items, SourceCheck(
         bank=bank,
         source_id=source["id"],
         source_type="web",
         source_value=root_url,
-        status="ok",
+        status=status,
         required=required,
         item_count=len(items),
+        error=error,
+        catalog_launch_hints=dated_catalog_leads,
     )
 
 
-def collect_previous_week(recovery_days: int = 7) -> tuple[datetime, datetime, list[RawItem], list[SourceCheck]]:
-    start, end = previous_calendar_week()
+def collect_period(
+    start: datetime, end: datetime, recovery_days: int = 21,
+) -> tuple[datetime, datetime, list[RawItem], list[SourceCheck]]:
+    """Collect a selected reporting window; campaign start is verified downstream."""
     scan_start = start - timedelta(days=recovery_days)
     items: list[RawItem] = []
     checks: list[SourceCheck] = []
@@ -538,3 +649,9 @@ def collect_previous_week(recovery_days: int = 7) -> tuple[datetime, datetime, l
             checks.append(check)
 
     return start, end, items, checks
+
+
+def collect_previous_week(recovery_days: int = 21) -> tuple[datetime, datetime, list[RawItem], list[SourceCheck]]:
+    """Backward-compatible weekly entry point."""
+    start, end = previous_calendar_week()
+    return collect_period(start, end, recovery_days=recovery_days)

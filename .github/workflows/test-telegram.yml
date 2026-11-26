@@ -2,13 +2,21 @@ name: Test Telegram connection
 
 on:
   workflow_dispatch:
+    inputs:
+      test_type:
+        description: "Choose one Telegram test"
+        required: true
+        type: choice
+        options:
+          - connection
+          - sber_card
 
 jobs:
   send-test:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout selected branch
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -19,8 +27,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Send Telegram test
+      - name: Send selected Telegram test
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: "-1004291568481"
-        run: python main.py --test-telegram
+        run: |
+          if [ "${{ inputs.test_type }}" = "sber_card" ]; then
+            python telegram_test_sber.py
+          else
+            python main.py --test-telegram
+          fi

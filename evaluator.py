@@ -14,11 +14,18 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from collector import RawItem, clean_text, _fetch_document
 from sources import official_link_priority
+from official_rules_search import discover_official_rule_urls
 
 MONTHS = {
     "января": 1, "февраля": 2, "марта": 3, "апреля": 4,
     "мая": 5, "июня": 6, "июля": 7, "августа": 8,
     "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
+}
+
+MONTHS_LOCATIVE = {
+    "январе": 1, "феврале": 2, "марте": 3, "апреле": 4,
+    "мае": 5, "июне": 6, "июле": 7, "августе": 8,
+    "сентябре": 9, "октябре": 10, "ноябре": 11, "декабре": 12,
 }
 
 PROMO_SIGNALS = (
@@ -30,7 +37,7 @@ ACTION_SIGNALS = (
     # Нельзя использовать существительные вроде "покупки"/"перевод" или
     # общее "участвовать": иначе в Daily Banking попадают конкурсы и
     # нефинансовые промо, где эти слова встречаются лишь в описании приза.
-    "оформ", "закаж", "соверш", "оплат", "покупайт", "купит",
+    "оформ", "закаж", "соверш", "оплат", "оплачива", "потрать", "покупайт", "купит",
     "попол", "снимайт", "снять", "перевед", "подключ", "активир",
     "откро",
 )
@@ -80,6 +87,8 @@ class Evaluation:
     promo_start: date | None = None
     promo_end: date | None = None
     evidence_url: str = ""
+    date_status: str = ""
+    date_evidence: str = ""
 
 
 def tidy(text: str) -> str:
@@ -227,6 +236,13 @@ def recheck_exact_period(
     ]
     queue = sorted(dict.fromkeys(queue), key=lambda url: _rule_link_priority(item.bank, url))
 
+    # A social post often omits the official rules link. Search official
+    # bank domains for candidates; never use search snippets as evidence.
+    # The same matching-rules check below must validate the fetched document.
+    for candidate in discover_official_rule_urls(item.bank, item.text):
+        if candidate not in queue:
+            queue.append(candidate)
+
     seen: set[str] = set()
     checked = 0
     evidence = base_evidence
@@ -246,7 +262,7 @@ def recheck_exact_period(
         checked += 1
         if page_text:
             combined = clean_text(f"{evidence} {page_text}")
-            period = extract_period(combined, item.published_at.date())
+            period = period_from_matching_rules(item, page_text)
             if period:
                 return period, combined, final_url or url
             evidence = combined
@@ -291,6 +307,26 @@ def parse_numeric_date(day: str, month: str, year: str) -> date | None:
 
 
 def extract_period(text: str, publication_date: date) -> tuple[date, date] | None:
+    # Two explicit adjacent calendar dates, including cross-month weekends:
+    # "на 31 октября и 1 ноября" is a two-day offer, not a single day.
+    month_names = "|".join(MONTHS.keys())
+    weekend = re.search(
+        rf"\bна\s+(\d{{1,2}})\s+({month_names})\s+и\s+"
+        rf"(\d{{1,2}})\s+({month_names})(?:\s+(20\d{{2}}))?\b",
+        text, re.IGNORECASE,
+    )
+    if weekend:
+        first_day, first_month, last_day, last_month, year = weekend.groups()
+        year = int(year) if year else publication_date.year
+        try:
+            start_day = date(year, MONTHS[first_month.lower()], int(first_day))
+            end_year = year + 1 if first_month.lower() == "декабря" and last_month.lower() == "января" else year
+            end_day = date(end_year, MONTHS[last_month.lower()], int(last_day))
+            if (end_day - start_day).days == 1:
+                return start_day, end_day
+        except ValueError:
+            pass
+
     numeric = re.search(
         r"(?:с\s*)?(\d{1,2})[./](\d{1,2})[./](\d{2,4})\s*(?:-|–|—|по)\s*"
         r"(\d{1,2})[./](\d{1,2})[./](\d{2,4})",
@@ -364,6 +400,110 @@ def extract_period(text: str, publication_date: date) -> tuple[date, date] | Non
     return None
 
 
+def extract_single_day_event(text: str, publication_date: date) -> tuple[date, date] | None:
+    """Recognize an explicitly dated one-day promo, for REVIEW only.
+
+    The quality gate rejects single-day offers from automatic publication.
+    A standalone date is not a general campaign start/end period.
+    """
+    month_names = "|".join(MONTHS)
+    for match in re.finditer(
+        rf"\b(\d{{1,2}})\s+({month_names})(?:\s+(20\d{{2}}))?\b",
+        text, re.IGNORECASE,
+    ):
+        before = text[max(0, match.start() - 20):match.start()].lower()
+        if re.search(r"\b(?:до|по|к|после|с)\s*$", before):
+            continue  # A deadline is not a one-day campaign period.
+        nearby = text[max(0, match.start() - 100):min(len(text), match.end() + 120)].lower()
+        if not any(token in nearby for token in (
+            "кешбэк", "кэшбэк", "скидк", "акци", "альфа-пятниц",
+            "возвращаем", "розыгрыш", "оплат",
+        )):
+            continue
+        try:
+            day = date(
+                int(match.group(3)) if match.group(3) else publication_date.year,
+                MONTHS[match.group(2).lower()],
+                int(match.group(1)),
+            )
+        except ValueError:
+            continue
+        if abs((day - publication_date).days) <= 45:
+            return day, day
+    return None
+
+
+def extract_date_hint(text: str) -> tuple[str, str]:
+    """Keep deadline/activity-month wording without inventing campaign dates."""
+    month_names = "|".join(MONTHS)
+    deadline = re.search(
+        rf"\bдо\s+\d{{1,2}}\s+(?:{month_names})(?:\s+20\d{{2}})?\b",
+        text, re.IGNORECASE,
+    )
+    if deadline:
+        return "deadline_only", tidy(deadline.group(0))
+    activity_months = "|".join(MONTHS_LOCATIVE)
+    activity = re.search(
+        rf"\b(?:за\s+покупки\s+)?в\s+(?:{activity_months})(?:\s+20\d{{2}})?\b",
+        text, re.IGNORECASE,
+    )
+    if activity:
+        return "activity_month_only", tidy(activity.group(0))
+    return "", ""
+
+
+def has_multiple_offers(text: str) -> bool:
+    """Do not merge different mechanics and their unrelated dates in one post."""
+    low = tidy(text).lower()
+    referral_and_marketplace = (
+        any(x in low for x in ("рекоменд", "другу", "друзьям"))
+        and "скидк" in low
+        and any(x in low for x in ("wildberries", "wb"))
+    )
+    cashback_and_redemption = (
+        ("кешбэк" in low or "кэшбэк" in low)
+        and "специальный курс" in low
+        and ("бонус" in low or "спасибо" in low)
+    )
+    return referral_and_marketplace or cashback_and_redemption
+
+
+def period_from_matching_rules(
+    item: RawItem, page_text: str,
+) -> tuple[date, date] | None:
+    """Only accept rule dates near the same reward, never from an arbitrary page."""
+    reward = extract_reward(item.text, item.text, item.bank)
+    amounts = re.findall(
+        r"\d+(?:[,.]\d+)?\s*(?:%|₽|руб\w*|млн)",
+        reward.lower(), re.IGNORECASE,
+    )
+    if not amounts:
+        return None
+    compact_page = re.sub(r"\s+", "", page_text.lower())
+    for amount in amounts:
+        needle = re.sub(r"\s+", "", amount.lower())
+        start = 0
+        while True:
+            pos = compact_page.find(needle, start)
+            if pos < 0:
+                break
+            # Find the corresponding position in the uncompressed text.
+            # Use a conservative local excerpt: unrelated rules stay excluded.
+            words = list(re.finditer(re.escape(amount.strip()).replace(r"\ ", r"\s*"), page_text, re.IGNORECASE))
+            for found in words[:10]:
+                excerpt = page_text[max(0, found.start() - 1100):min(len(page_text), found.end() + 1100)]
+                # Без даты публикации год не выводим из времени сканирования.
+                if item.published_at is None and not re.search(r"\b20\d{2}\b", excerpt):
+                    continue
+                reference_date = item.published_at.date() if item.published_at else date.today()
+                period = extract_period(excerpt, reference_date)
+                if period:
+                    return period
+            start = pos + len(needle)
+            break
+    return None
+
+
 def find_amount(text: str) -> str:
     match = re.search(r"\b\d[\d\s]{0,12}\s*(?:₽|руб(?:лей|ля|ль|\.)?)", text, re.IGNORECASE)
     return tidy(match.group(0)) if match else ""
@@ -422,11 +562,35 @@ def extract_reward(post_text: str, evidence_text: str, bank: str) -> str:
         if pct:
             return f"Скидка {tidy(pct.group(0))}"
 
+    if any(x in low for x in ("розыгрыш", "разыгрыв", "разыграем", "приз")):
+        bonus_prize = re.search(
+            r"\b(\d+(?:[,.]\d+)?\s*(?:млн|миллион\w*)\s+бонус\w*(?:\s+спасибо)?)",
+            post, re.IGNORECASE,
+        )
+        if bonus_prize:
+            return f"Розыгрыш {tidy(bonus_prize.group(1))}"
+        main_prize = re.search(
+            r"главн\w*\s+приз\s*[-–—:]*\s*"
+            r"(\d+(?:[,.]\d+)?\s*(?:млн|миллион\w*)\s*(?:₽|руб\w*))",
+            post, re.IGNORECASE,
+        )
+        if main_prize:
+            return f"Розыгрыш: главный приз {tidy(main_prize.group(1))}"
+
+    cash_return = re.search(
+        r"\b(?:верн(?:ем|ём|ут|ётся|ется)|возвращаем|вернём)\s+"
+        r"(\d[\d\s]*\s*(?:₽|руб(?:лей|ля|ль|\.)?))",
+        post, re.IGNORECASE,
+    )
+    if cash_return:
+        return f"Возврат {tidy(cash_return.group(1))}"
+
     for source in (post, evidence_text):
         for sentence in sentences(source):
             low_sentence = sentence.lower()
             if any(x in low_sentence for x in ("кешбэк", "кэшбэк", "бонус", "розыгрыш", "подар", "приз", "скидк")):
-                if re.search(r"\d|%|₽|руб|балл", sentence, re.IGNORECASE):
+                without_dates = re.sub(r"\b\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\b", "", sentence)
+                if re.search(r"\d[\d\s]*(?:%|₽|руб)|\b\d+\s*балл", without_dates, re.IGNORECASE):
                     return tidy(sentence)
     return ""
 
@@ -490,6 +654,8 @@ def classify_goal(post_text: str) -> str:
     low = tidy(post_text).lower()
     if any(x in low for x in ("новым клиент", "новые клиенты", "новым владельц", "впервые оформ")):
         return "привлечение новых клиентов"
+    if any(x in low for x in ("оформите кредит", "оформите карту", "откройте вклад", "открывайте вклад")):
+        return "оформление банковского продукта"
     return "транзакционная активность текущих клиентов"
 
 
@@ -505,7 +671,32 @@ def classify_mechanic(post_text: str) -> str:
         return "реферальная программа"
     if "бонус" in low or "балл" in low:
         return "бонусы"
+    if re.search(r"\b(?:вернем|вернём|возвращаем)\s+\d", low):
+        return "денежный возврат"
     return "промо-механика"
+
+
+def official_alfa_rule_campaign_period(text: str) -> tuple[date, date] | None:
+    """Prefer the explicitly declared campaign period in official Alfa rules.
+
+    A reporting, qualifying or participation subperiod MUST NOT silently
+    become the campaign start. Do not infer dates from unrelated PDF examples.
+    """
+    if not tidy(text).lower().startswith(("правила проведения акции", "правила акции")):
+        return None
+    for match in re.finditer(
+        r"Период\s+проведения\s+Акции\s*[–—-]\s*",
+        text, re.IGNORECASE,
+    ):
+        excerpt = text[match.end():match.end() + 100]
+        # PDF without an explicit campaign year must go to review, not
+        # silently inherit the year of the current monitoring run.
+        if not re.search(r"\b20\d{2}\b", excerpt):
+            continue
+        period = extract_period(excerpt, date(2026, 1, 1))
+        if period:
+            return period
+    return None
 
 
 def evaluate(item: RawItem) -> Evaluation:
@@ -535,45 +726,84 @@ def evaluate(item: RawItem) -> Evaluation:
             evidence_url=evidence_url,
         )
 
-    period = extract_period(evidence, item.published_at.date())
-
-    # Never infer the promotion period solely from "today" in a social post.
-    # Exact dates must be present in the source evidence.
-    if not period:
-        period, evidence, evidence_url = recheck_exact_period(
-            item,
-            evidence,
-            evidence_url,
-        )
-
-    if not period:
+    # A mixed social post can describe separate offers with separate periods.
+    # Never borrow the reward or dates of one offer for another.
+    if has_multiple_offers(item.text):
         return Evaluation(
-            False,
-            "no_exact_period_after_recheck",
-            evidence_url=evidence_url,
+            False, "multiple_offers_require_split",
+            evidence_url=item.url,
+            date_status="multiple_offers",
+            date_evidence="Несколько разных предложений в одной публикации",
         )
 
-    reward = extract_reward(item.text, evidence, item.bank)
-    if not reward:
-        return Evaluation(False, "no_reward", evidence_url=evidence_url)
+    # Если отсутствует дата публикации, для периода требуется явный год.
+    reference_date = item.published_at.date() if item.published_at else date.today()
+    explicit_year = bool(re.search(r"\b20\d{2}\b", item.text))
+    is_official_alfa_rules = (
+        item.bank == "Альфа-Банк"
+        and item.source_type == "web"
+        and tidy(item.text).lower().startswith(("правила проведения акции", "правила акции"))
+    )
+    period = (
+        official_alfa_rule_campaign_period(item.text)
+        if is_official_alfa_rules
+        else extract_period(item.text, reference_date)
+        if item.published_at is not None or explicit_year
+        else None
+    )
+    if not period and item.published_at is not None:
+        period = extract_single_day_event(item.text, reference_date)
 
-    conditions = extract_conditions(item.text, evidence, item.bank)
-    if not conditions:
-        return Evaluation(False, "no_conditions", evidence_url=evidence_url)
+    # Do not infer a period from the post date or a deadline alone.
+    if not period and not is_official_alfa_rules:
+        period, evidence, evidence_url = recheck_exact_period(
+            item, evidence, evidence_url,
+        )
+
+    # Keep fields from the original offer together for audit and review.
+    # The linked rules can establish dates only when the reward matches.
+    reward = extract_reward(item.text, item.text, item.bank)
+    conditions = extract_conditions(item.text, item.text, item.bank)
+    title = make_title(item.text, item.bank)
+    mechanic = classify_mechanic(item.text)
+    goal = classify_goal(item.text)
+    base = dict(
+        title=title, reward=reward, conditions=conditions,
+        mechanic=mechanic, goal=goal, evidence_url=evidence_url,
+    )
+
+    if not period:
+        date_status, date_evidence = extract_date_hint(item.text)
+        reason = {
+            "deadline_only": "deadline_only_needs_start",
+            "activity_month_only": "activity_month_only_needs_terms",
+        }.get(date_status, "no_exact_period_after_recheck")
+        return Evaluation(
+            False, reason, **base,
+            date_status=date_status, date_evidence=date_evidence,
+        )
 
     start, end = period
-    if end < item.published_at.date():
-        return Evaluation(False, "period_ended_before_publication", evidence_url=evidence_url)
+    if not reward:
+        return Evaluation(
+            False, "no_reward", **base, promo_start=start, promo_end=end,
+        )
+    if not conditions:
+        return Evaluation(
+            False, "no_conditions", **base, promo_start=start, promo_end=end,
+        )
+    if item.published_at is not None and end < item.published_at.date():
+        return Evaluation(
+            False, "period_ended_before_publication",
+            **base, promo_start=start, promo_end=end,
+        )
 
     return Evaluation(
-        True,
-        "included",
-        title=make_title(item.text, item.bank),
-        goal=classify_goal(item.text),
-        mechanic=classify_mechanic(item.text),
-        reward=reward,
-        conditions=conditions,
-        promo_start=start,
-        promo_end=end,
-        evidence_url=evidence_url,
+        True, "included", **base,
+        promo_start=start, promo_end=end,
+        date_status="single_day" if start == end else "exact_period",
+        date_evidence=(
+            f"{start:%d.%m.%Y}" if start == end
+            else f"{start:%d.%m.%Y} - {end:%d.%m.%Y}"
+        ),
     )

@@ -1,0 +1,232 @@
+"""Read-only twice-daily pilot: collect offers, audit coverage, NEVER publish.
+
+Pilot dates are deliberately bounded. The existing weekly monitor and Telegram
+publisher remain unchanged.
+"""
+from __future__ import annotations
+
+import csv
+import json
+from collections import Counter
+from datetime import date, datetime, time
+import re
+from pathlib import Path
+
+from collector import MOSCOW, collect_period
+from evaluator import evaluate, MONTHS
+from pipeline import _mark_duplicates, write_audit
+from quality import validate_card
+from sources import BANKS, strict_coverage_failures
+
+PILOT_START = date(2026, 11, 3)
+PILOT_END = date(2026, 11, 16)
+ARTIFACT_DIR = Path("artifacts")
+
+REVIEW_REASONS = {
+    "no_exact_period_after_recheck", "no_reward", "no_conditions",
+    "quality_single_day_requires_review", "deadline_only_needs_start",
+    "activity_month_only_needs_terms", "multiple_offers_require_split",
+    "quality_unstructured_card", "quality_irrelevant_text",
+    "quality_mechanic_mismatch", "quality_unverified_reward",
+    "quality_unknown_mechanic", "quality_no_bank_product_link",
+    "quality_missing_required_field", "quality_invalid_source",
+}
+
+
+def explicit_dated_vtb_plus_suboffer(item, report_day: date):
+    """Flag a separately dated offer embedded inside a mixed official post.
+
+    This is ONLY a manual-review lead. The parent post remains unchanged;
+    a matched percentage or date never authorizes automatic publication.
+    The qualifier, action, percentage and transaction day must occur together.
+    """
+    if item.bank != "ВТБ" or item.source_type != "telegram" or not item.published_at:
+        return None
+    month_names = "|".join(MONTHS)
+    pattern = (
+        rf"подписчик\w*\s+ВТБ\s+Плюс.{{0,150}}?"
+        rf"(?P<pct>\d{{1,3}})\s*%\s*(?:кешбэк|кэшбэк)\w*"
+        rf"\s+на\s+покупки\s+(?P<day>\d{{1,2}})\s+"
+        rf"(?P<month>{month_names})(?:\s+(?P<year>20\d{{2}}))?"
+    )
+    match = re.search(pattern, item.text, re.IGNORECASE)
+    if not match:
+        return None
+    context = match.group(0).lower()
+    if not re.search(r"\b(?:выбра\w*|выбери\w*|активир\w*)\b", context):
+        return None
+    year = int(match.group("year")) if match.group("year") else item.published_at.year
+    try:
+        purchase_day = date(year, MONTHS[match.group("month").lower()], int(match.group("day")))
+    except ValueError:
+        return None
+    posted_day = item.published_at.date()
+    if not 0 <= (purchase_day - posted_day).days <= 14:
+        return None
+    if purchase_day != report_day:
+        return None
+    categories = re.search(r"[«\"]Развлечения[»\"].{0,120}[«\"]Цветы[»\"]", item.text, re.IGNORECASE)
+    return {
+        "bank": item.bank,
+        "status": "review",
+        "reason": "mixed_post_explicit_dated_offer",
+        "source_id": item.source_id,
+        "published_at": item.published_at.isoformat(),
+        "promo_start": purchase_day.isoformat(),
+        "promo_end": purchase_day.isoformat(),
+        "title": f"ВТБ Плюс: {match.group('pct')}% кешбэка на покупки {match.group('day')} {match.group('month')}",
+        "reward": f"{match.group('pct')}% кешбэка",
+        "conditions": (
+            "Для подписчиков ВТБ Плюс; выбрать одну из предложенных категорий. "
+            "Подробные ограничения и условия проверить перед публикацией."
+        ),
+        "source_url": item.url,
+        "source_excerpt": match.group(0) + ((" " + categories.group(0)) if categories else ""),
+    }
+
+
+def reporting_window(now: datetime | None = None):
+    now = now or datetime.now(MOSCOW)
+    now = now.astimezone(MOSCOW)
+    start = datetime.combine(now.date(), time.min, tzinfo=MOSCOW)
+    return start, now
+
+
+def main() -> None:
+    start, end = reporting_window()
+    if not PILOT_START <= end.date() <= PILOT_END:
+        print("Daily Banking pilot is outside its approved 03-16 Nov date range; skip.")
+        return
+
+    print(f"Daily Banking diagnostic run: {start:%d.%m.%Y} {start:%H:%M} to {end:%H:%M} Moscow")
+    print("NO TELEGRAM PUBLICATION / NO STATE CHANGES.")
+    _, _, items, checks = collect_period(start, end, recovery_days=21)
+    evaluated = [(item, evaluate(item)) for item in items]
+    for item, result in evaluated:
+        rejection = validate_card(item, result)
+        if rejection:
+            result.included = False
+            result.reason = rejection
+    _mark_duplicates(evaluated)
+
+    # Preserve a traceable review lead if a separate, explicitly dated
+    # banking offer appears inside a composite social post.
+    split_review = []
+    for item in items:
+        lead = explicit_dated_vtb_plus_suboffer(item, start.date())
+        if lead is not None:
+            split_review.append(lead)
+    unique_leads = {row["source_url"] + ":" + row["promo_start"]: row for row in split_review}
+    split_review = list(unique_leads.values())
+
+    for item, result in evaluated:
+        if not result.included:
+            continue
+        # Calendar-day launch rule, NEVER publication day.
+        if result.promo_start is None or not (
+            start.date() <= result.promo_start <= end.date()
+        ):
+            result.included = False
+            result.reason = "outside_launch_day"
+
+    write_audit(start, end, evaluated, checks)
+    ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+    key = end.strftime("%Y-%m-%d_%H%M")
+    failures = strict_coverage_failures(checks)
+    by_bank = {}
+    for bank in BANKS:
+        rows = [(item, result) for item, result in evaluated if item.bank == bank]
+        sources = [check for check in checks if check.bank == bank]
+        by_bank[bank] = {
+            "collected_materials": len(rows),
+            "algorithm_candidates": sum(1 for _, res in rows if res.included),
+            "requires_manual_review": sum(1 for _, res in rows if res.reason in REVIEW_REASONS),
+            "source_issues": [
+                {"id": c.source_id, "status": c.status, "error": c.error}
+                for c in sources if c.status != "ok"
+            ],
+        }
+
+    # Preserve leads from the full official rules index, not just the first
+    # 35 downloaded documents. A dated catalogue label is a lead for checking,
+    # NEVER a verified campaign period or a Telegram-ready card.
+    catalog_leads = [
+        (c.bank, c.source_id, lead)
+        for c in checks
+        for lead in c.catalog_launch_hints
+    ]
+    catalog_file = ARTIFACT_DIR / f"daily_catalog_leads_{key}.csv"
+    with catalog_file.open("w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.writer(file, delimiter=";")
+        writer.writerow([
+            "bank", "source_id", "catalog_start_hint",
+            "document_fetched", "source_url", "catalog_text",
+        ])
+        for bank, source_id, lead in catalog_leads:
+            writer.writerow([
+                bank, source_id, lead["start_hint"], lead["document_fetched"],
+                lead["url"], lead["catalog_text"],
+            ])
+
+    manifest = {
+        "catalog_index_date_leads": len(catalog_leads),
+        "catalog_index_unfetched_leads": sum(
+            not lead["document_fetched"] for _, _, lead in catalog_leads
+        ),
+        "pilot_window": [PILOT_START.isoformat(), PILOT_END.isoformat()],
+        "audit_date": end.date().isoformat(),
+        "audit_time_moscow": end.isoformat(),
+        "published_to_telegram": False,
+        "all_banks": len(BANKS),
+        "collected_materials": len(evaluated),
+        "algorithm_candidates": sum(1 for _, res in evaluated if res.included),
+        "requires_manual_review": sum(1 for _, res in evaluated if res.reason in REVIEW_REASONS),
+        "explicit_dated_suboffers_for_review": len(split_review),
+        "total_review_queue_entries": sum(1 for _, res in evaluated if res.reason in REVIEW_REASONS) + len(split_review),
+        "source_coverage_confirmed": len(failures) == 0,
+        "required_source_failures": failures,
+        "by_bank": by_bank,
+        "reasons": dict(Counter(res.reason for _, res in evaluated)),
+    }
+    report_path = ARTIFACT_DIR / f"daily_pilot_{key}.json"
+    report_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    queue_path = ARTIFACT_DIR / f"daily_candidates_{key}.csv"
+    with queue_path.open("w", encoding="utf-8-sig", newline="") as file:
+        out = csv.writer(file, delimiter=";")
+        out.writerow([
+            "bank", "status", "reason", "source_id", "published_at",
+            "promo_start", "promo_end", "title", "reward", "conditions",
+            "source_url", "source_excerpt",
+        ])
+        for item, res in evaluated:
+            if not res.included and res.reason not in REVIEW_REASONS:
+                continue
+            out.writerow([
+                item.bank,
+                "algorithm_candidate" if res.included else "review",
+                res.reason,
+                item.source_id,
+                item.published_at.isoformat() if item.published_at else "",
+                res.promo_start.isoformat() if res.promo_start else "",
+                res.promo_end.isoformat() if res.promo_end else "",
+                res.title, res.reward, res.conditions,
+                res.evidence_url or item.url, item.text[:900],
+            ])
+        for lead in split_review:
+            out.writerow([
+                lead["bank"], lead["status"], lead["reason"], lead["source_id"],
+                lead["published_at"], lead["promo_start"], lead["promo_end"],
+                lead["title"], lead["reward"], lead["conditions"],
+                lead["source_url"], lead["source_excerpt"],
+            ])
+    print(f"Collected: {manifest['collected_materials']}, algorithm candidates: {manifest['algorithm_candidates']}, review: {manifest['requires_manual_review']}.")
+    print(f"Required-source failures: {len(failures)}. These do not suppress the diagnostic audit.")
+    print(f"Catalogue leads (index only): {len(catalog_leads)}; not fetched: {manifest['catalog_index_unfetched_leads']}.")
+    print(f"Reports: {report_path}, {queue_path}, {catalog_file}")
+    print("PILOT ONLY: no messages sent to Telegram.")
+
+
+if __name__ == "__main__":
+    main()

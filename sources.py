@@ -29,6 +29,7 @@ SOURCE_REGISTRY = [
         "bank": "ВТБ",
         "sources": [
             {"id": "vtb_tg", "type": "telegram", "value": "BankVTB", "url": "https://t.me/BankVTB", "role": "official_channel", "required": True, "automatic": True},
+            {"id": "vtb_promos_tg", "type": "telegram", "value": "vtbvygoda", "url": "https://t.me/vtbvygoda", "role": "official_loyalty_channel", "required": True, "automatic": True},
             {"id": "vtb_max", "type": "max", "value": "vtb", "url": "https://max.ru/vtb", "role": "official_channel", "required": False, "automatic": False},
             {"id": "vtb_web_debit", "type": "web", "value": "https://www.vtb.ru/personal/karty/debetovye/", "url": "https://www.vtb.ru/personal/karty/debetovye/", "role": "debit_cards", "required": True, "automatic": True},
             {"id": "vtb_web_cards", "type": "web", "value": "https://www.vtb.ru/personal/karty/", "url": "https://www.vtb.ru/personal/karty/", "role": "cards_promotions", "required": False, "automatic": True},
@@ -38,6 +39,7 @@ SOURCE_REGISTRY = [
         "bank": "Альфа-Банк",
         "sources": [
             {"id": "alfa_tg", "type": "telegram", "value": "alfabank", "url": "https://t.me/alfabank", "role": "official_channel", "required": True, "automatic": True},
+            {"id": "alfa_promos_tg", "type": "telegram", "value": "alfa_vygodno", "url": "https://t.me/alfa_vygodno", "role": "official_promo_channel", "required": True, "automatic": True},
             {"id": "alfa_max_bot", "type": "max_bot", "value": "alfabank_bot", "url": "https://max.ru/alfabank_bot", "role": "service_bot_not_content_channel", "required": False, "automatic": False},
             {"id": "alfa_web_actions", "type": "web", "value": "https://alfabank.ru/actions/rules/", "url": "https://alfabank.ru/actions/rules/", "role": "promotion_rules", "required": False, "required_any_group": "alfa_official_web", "required_any_group_blocking": False, "automatic": True},
             {"id": "alfa_web_debit", "type": "web", "value": "https://alfabank.ru/everyday/debit-cards/alfacard/", "url": "https://alfabank.ru/everyday/debit-cards/alfacard/", "role": "debit_card", "required": False, "required_any_group": "alfa_official_web", "required_any_group_blocking": False, "automatic": True},
@@ -91,6 +93,7 @@ SOURCE_REGISTRY = [
         "bank": "Совкомбанк",
         "sources": [
             {"id": "sovcom_tg", "type": "telegram", "value": "sovcombankofficial", "url": "https://t.me/sovcombankofficial", "role": "official_channel", "required": True, "automatic": True},
+            {"id": "sovcom_halva_tg", "type": "telegram", "value": "halvacard_official", "url": "https://t.me/halvacard_official", "role": "official_card_promo_channel", "required": True, "automatic": True},
             {"id": "sovcom_max", "type": "max", "value": "sovcombank", "url": "https://max.ru/sovcombank", "role": "official_channel", "required": False, "automatic": False},
             {"id": "sovcom_web_actions", "type": "web", "value": "https://sovcombank.ru/pages/vse-aktsii-karti-halva-", "url": "https://sovcombank.ru/pages/vse-aktsii-karti-halva-", "role": "halva_promotions", "required": True, "automatic": True},
         ],
