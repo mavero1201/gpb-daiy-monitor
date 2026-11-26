@@ -121,11 +121,11 @@ class SabinaOctoberControls(unittest.TestCase):
         root = BeautifulSoup('<html><body><a href="/promo/one.pdf">Правила акции карта</a><a href="/promo/two.pdf">Правила акции тариф</a></body></html>',"html.parser")
         documents = {
             "https://www.psbank.ru/promo/one.pdf":("Правила проведения акции. Оформите дебетовую карту ПСБ. Сертификат 3000 рублей. Период проведения Акции: с 01.10.2026 по 30.10.2026. " * 2,None,"https://www.psbank.ru/promo/one.pdf"),
-            "https://www.psbank.ru/promo/two.pdf":("Обычный банковский тариф для держателей карты без призов и акции. " * 3,None,"https://www.psbank.ru/promo/two.pdf"),
+            "https://www.psbank.ru/promo/two.pdf":("Обычный банковский тариф для держателей карты, ставки и тарифные комиссии. " * 3,None,"https://www.psbank.ru/promo/two.pdf"),
         }
         def get_doc(url):
             if url == source["value"]:
-                return "Правила акции: список доступных документов для держателей карт ПСБ",root,url
+                return "Правила акции: список доступных документов для держателей карт ПСБ. " * 3,root,url
             return documents[url]
         begin=datetime(2026,10,19,tzinfo=ZoneInfo("Europe/Moscow"))
         end=datetime(2026,10,25,tzinfo=ZoneInfo("Europe/Moscow"))
