@@ -31,6 +31,7 @@ MONTHS_LOCATIVE = {
 PROMO_SIGNALS = (
     "акци", "кешбэк", "кэшбэк", "бонус", "розыгрыш", "подар",
     "скидк", "промокод", "выигра", "приз", "вернем", "вернём",
+    "сертификат", "подарочн", "поощрен",
 )
 ACTION_SIGNALS = (
     # Только явные клиентские действия по продукту/транзакции.
@@ -39,7 +40,7 @@ ACTION_SIGNALS = (
     # нефинансовые промо, где эти слова встречаются лишь в описании приза.
     "оформ", "закаж", "соверш", "оплат", "оплачива", "потрать", "покупайт", "купит",
     "попол", "снимайт", "снять", "перевед", "подключ", "активир",
-    "откро",
+    "откро", "перенес", "перенос", "зачисл", "выпуст",
 )
 
 ACTION_PATTERNS = (
@@ -52,7 +53,7 @@ BANKING_CONTEXT = (
     "карт", "дебетов", "счет", "счёт", "платеж", "оплат", "покуп",
     "перевод", "попол", "сняти", "банкомат", "кешбэк", "кэшбэк",
     "балл", "кошелек", "кошелёк", "вклад", "страхован", "осаго",
-    "каско", "pay", "пэй",
+    "каско", "pay", "пэй", "зарплат", "перенос номера",
 )
 EXCLUDE_KEYWORDS = (
     "детская карта", "детской карт", "детских карт", "для детей",
@@ -400,6 +401,36 @@ def extract_period(text: str, publication_date: date) -> tuple[date, date] | Non
     return None
 
 
+def declared_campaign_period(text: str, reference_date: date) -> tuple[tuple[date, date] | None, str]:
+    """Read a named CAMPAIGN period, not a draw, payout or purchase deadline.
+
+    Only a full year-anchored period is accepted from documents. Absence of a
+    year or a conflicting/malformed period is sent to manual review. This is
+    stronger evidence than the first numeric pair on a long rules page.
+    """
+    markers = re.compile(
+        r"(?:общий\s+)?(?:период|срок)\s+проведения\s+"
+        r"(?:настоящей\s+)?акции"
+        r"|акци[яи]\s+(?:действу\w*|провод\w*|проход\w*)",
+        re.IGNORECASE,
+    )
+    found = []
+    for m in markers.finditer(text):
+        chunk = text[m.end():m.end() + 230]
+        chunk = re.split(r"(?:(?:Период|Срок)\s+(?:выплаты|начисления|совершения|участия|приема|приёма))", chunk, maxsplit=1, flags=re.IGNORECASE)[0]
+        if not re.search(r"\b20\d{2}\b", chunk):
+            continue
+        period = extract_period(chunk, reference_date)
+        if period:
+            found.append((period, tidy(text[m.start():m.end()] + chunk[:170])))
+    if not found:
+        return None, ""
+    distinct = {pair for pair, _ in found}
+    if len(distinct) > 1:
+        return None, "conflicting_campaign_periods"
+    return found[0]
+
+
 def extract_single_day_event(text: str, publication_date: date) -> tuple[date, date] | None:
     """Recognize an explicitly dated one-day promo, for REVIEW only.
 
@@ -585,10 +616,19 @@ def extract_reward(post_text: str, evidence_text: str, bank: str) -> str:
     if cash_return:
         return f"Возврат {tidy(cash_return.group(1))}"
 
+    # A certificate is the reward, not the customer's payment amount.
+    cert = re.search(
+        r"сертификат(?:\w*|\s+на\s+покупки)?[^.]{0,85}?"
+        r"(\d[\d\s]{0,10}\s*(?:₽|руб\w*))",
+        post, re.IGNORECASE,
+    )
+    if cert:
+        return f"Сертификат {tidy(cert.group(1))}"
+
     for source in (post, evidence_text):
         for sentence in sentences(source):
             low_sentence = sentence.lower()
-            if any(x in low_sentence for x in ("кешбэк", "кэшбэк", "бонус", "розыгрыш", "подар", "приз", "скидк")):
+            if any(x in low_sentence for x in ("кешбэк", "кэшбэк", "бонус", "розыгрыш", "подар", "приз", "скидк", "сертификат")):
                 without_dates = re.sub(r"\b\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\b", "", sentence)
                 if re.search(r"\d[\d\s]*(?:%|₽|руб)|\b\d+\s*балл", without_dates, re.IGNORECASE):
                     return tidy(sentence)
@@ -635,6 +675,8 @@ def extract_conditions(post_text: str, evidence_text: str, bank: str) -> str:
         r"(Снимите[^.!?]*[.!?]?)",
         r"(Активируйте[^.!?]*[.!?]?)",
         r"(Зарегистрируйтесь[^.!?]*[.!?]?)",
+        r"(Переведите\s+зарплату[^.!?]*[.!?]?)",
+        r"(Перенесите\s+номер[^.!?]*[.!?]?)",
         r"(Зайдите[^.!?]*[.!?]?)",
         r"(Заходите[^.!?]*[.!?]?)",
         r"(Выберите[^.!?]*[.!?]?)",
@@ -663,6 +705,8 @@ def classify_mechanic(post_text: str) -> str:
     low = tidy(post_text).lower()
     if "розыгрыш" in low or "разыгрыв" in low:
         return "розыгрыш"
+    if "сертификат" in low or "подарочная карта" in low:
+        return "сертификат"
     if "кешбэк" in low or "кэшбэк" in low:
         return "кешбэк"
     if "скидк" in low or "промокод" in low:
@@ -744,13 +788,22 @@ def evaluate(item: RawItem) -> Evaluation:
         and item.source_type == "web"
         and tidy(item.text).lower().startswith(("правила проведения акции", "правила акции"))
     )
+    # Explicitly labelled campaign periods outrank dates of draws, payouts,
+    # activity windows, publications and deadlines on long official pages.
+    declared_period, declared_quote = declared_campaign_period(
+        item.text, reference_date,
+    )
     period = (
-        official_alfa_rule_campaign_period(item.text)
+        declared_period
+        if declared_period is not None
+        else official_alfa_rule_campaign_period(item.text)
         if is_official_alfa_rules
         else extract_period(item.text, reference_date)
         if item.published_at is not None or explicit_year
         else None
     )
+    if declared_quote == "conflicting_campaign_periods":
+        period = None
     if not period and item.published_at is not None:
         period = extract_single_day_event(item.text, reference_date)
 
@@ -774,10 +827,14 @@ def evaluate(item: RawItem) -> Evaluation:
 
     if not period:
         date_status, date_evidence = extract_date_hint(item.text)
+        if declared_quote == "conflicting_campaign_periods":
+            date_status, date_evidence = "conflicting_campaign_periods", "More than one declared campaign period"
         reason = {
             "deadline_only": "deadline_only_needs_start",
             "activity_month_only": "activity_month_only_needs_terms",
         }.get(date_status, "no_exact_period_after_recheck")
+        if date_status == "conflicting_campaign_periods":
+            reason = "conflicting_campaign_periods"
         return Evaluation(
             False, reason, **base,
             date_status=date_status, date_evidence=date_evidence,
@@ -802,7 +859,7 @@ def evaluate(item: RawItem) -> Evaluation:
         True, "included", **base,
         promo_start=start, promo_end=end,
         date_status="single_day" if start == end else "exact_period",
-        date_evidence=(
+        date_evidence=declared_quote or (
             f"{start:%d.%m.%Y}" if start == end
             else f"{start:%d.%m.%Y} - {end:%d.%m.%Y}"
         ),
