@@ -267,7 +267,7 @@ def write_audit(start, end, evaluated, source_checks):
                 result.promo_end.isoformat() if result.promo_end else "",
                 item.published_at.date().isoformat() if item.published_at else "",
                 result.reward, result.conditions, result.mechanic,
-                result.goal, result.evidence_url or item.url,
+                getattr(result, "goal", ""), result.evidence_url or item.url,
                 item.source_id, "eligible_not_delivery_confirmed",
             ])
 
