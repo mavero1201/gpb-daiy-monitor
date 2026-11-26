@@ -23,12 +23,13 @@ MOSCOW = ZoneInfo("Europe/Moscow")
 PROMO_HINTS = (
     "акци", "кешбэк", "кэшбэк", "бонус", "розыгрыш", "подар",
     "скидк", "промокод", "выигра", "спецпредлож", "предложение",
-    "cashback", "promo",
+    "cashback", "promo", "сертификат", "поощрени", "приз",
 )
 
 BANKING_HINTS = (
     "карт", "дебет", "плат", "покуп", "перевод", "попол", "сняти",
     "кошелек", "кошелёк", "pay", "кешбэк", "кэшбэк", "бонус",
+    "зарплат", "банковск", "страхован",
 )
 
 DATE_PATTERNS = (
@@ -52,6 +53,7 @@ class RawItem:
     text: str
     url: str
     external_links: list[str]
+    raw_html: str = ""
 
 
 @dataclass
@@ -65,6 +67,7 @@ class SourceCheck:
     item_count: int = 0
     error: str = ""
     catalog_launch_hints: list[dict] = field(default_factory=list)
+    catalog_index: list[dict] = field(default_factory=list)
 
 
 def previous_calendar_week(now: datetime | None = None) -> tuple[datetime, datetime]:
@@ -176,6 +179,7 @@ def fetch_telegram_source(bank: str, source: dict, start: datetime, end: datetim
                     text=text,
                     url=post_url,
                     external_links=links,
+                    raw_html=str(text_tag)[:60000],
                 )
             )
 
@@ -477,6 +481,12 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
 
     candidate_urls: list[str] = []
     candidate_hints: dict[str, str] = {}
+    # Every indexed link is audited before evaluating or skipping documents.
+    catalog_index: list[dict] = [{
+        "url": root_url, "stage": "catalog_root",
+        "source_text_excerpt": root_text[:3000],
+        "link_label": source.get("role", "source_root"),
+    }]
 
     if root_soup is not None:
         for a in root_soup.select("a[href]"):
@@ -538,6 +548,21 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
             "document_fetched": link in chosen_links,
         })
 
+    # Preserve *all* discovered links including the ones beyond the crawl cap.
+    index_by_url = {}
+    for url in candidate_urls:
+        entry = {
+            "url": url,
+            "stage": "queued_for_fetch" if url in chosen_links else "not_fetched_link_cap",
+            "link_label": candidate_hints.get(url, "")[:700],
+            "date_hint_unverified": (
+                _catalog_launch_date_hint(candidate_hints.get(url, "")).isoformat()
+                if _catalog_launch_date_hint(candidate_hints.get(url, "")) else ""
+            ),
+        }
+        catalog_index.append(entry)
+        index_by_url[url] = entry
+
     fetch_errors = 0
     for url in candidate_urls[:link_limit]:
         if url in seen_urls:
@@ -546,19 +571,27 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
 
         try:
             text, soup, final_url = _fetch_document(url)
-        except Exception:
+        except Exception as exc:
             fetch_errors += 1
+            index_by_url[url]["stage"] = "fetch_error"
+            index_by_url[url]["error"] = str(exc)[:250]
             continue
 
+        index_by_url[url]["final_url"] = final_url
+        index_by_url[url]["source_text_excerpt"] = text[:4000]
         if len(text) < 100:
             fetch_errors += 1
+            index_by_url[url]["stage"] = "unreadable_document"
             continue
 
         low = text.lower()
         if not any(x in low for x in PROMO_HINTS):
+            index_by_url[url]["stage"] = "prefilter_no_promo_signal"
             continue
         if not any(x in low for x in BANKING_HINTS):
+            index_by_url[url]["stage"] = "prefilter_no_bank_context"
             continue
+        index_by_url[url]["stage"] = "raw_item_created"
 
         if soup is not None:
             published = _extract_published_at_html(soup, final_url)
@@ -592,6 +625,7 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
                 text=text,
                 url=final_url,
                 external_links=links,
+                raw_html=str(soup)[:60000] if soup is not None else "",
             )
         )
 
@@ -616,6 +650,7 @@ def fetch_web_source(bank: str, source: dict, start: datetime, end: datetime) ->
         item_count=len(items),
         error=error,
         catalog_launch_hints=dated_catalog_leads,
+        catalog_index=catalog_index,
     )
 
 

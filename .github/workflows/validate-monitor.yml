@@ -38,18 +38,39 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Collect and audit previous week (never publish)
+      - name: Collect and audit 9-15 November benchmark (never publish)
         env:
           PUBLISH_TO_TELEGRAM: '0'
           REPUBLISH_WEEK: '0'
           FORCE_RUN: '1'
           STRICT_SOURCES: '1'
-        run: python preview.py
+        run: |
+          python - <<'PY'
+          from datetime import datetime, time, date
+          from unittest.mock import patch
+          from zoneinfo import ZoneInfo
+          import collector
+          import pipeline
+          from sources import strict_coverage_failures
+          zone = ZoneInfo("Europe/Moscow")
+          start = datetime.combine(date(2026, 11, 9), time.min, tzinfo=zone)
+          end = datetime.combine(date(2026, 11, 15), time.max, tzinfo=zone)
+          empty_state = {"last_successful_period_start": None, "last_successful_period_end": None, "sent_promos": {}}
+          def historical_collect(recovery_days=7):
+              return collector.collect_period(start, end, recovery_days=recovery_days)
+          with patch.object(pipeline, "collect_previous_week", side_effect=historical_collect), patch.object(pipeline, "load_state", return_value=empty_state):
+              start, end, evaluated, checks, included, recovered, state = pipeline.run_pipeline()
+          paths = pipeline.write_audit(start, end, evaluated, checks)
+          print("HISTORICAL BENCHMARK:", start.date(), end.date())
+          print("RAW ITEMS:", len(evaluated), "ELIGIBLE:", len(included), "RECOVERED:", len(recovered))
+          print("REQUIRED SOURCE COVERAGE FAILURES:", strict_coverage_failures(checks))
+          print("AUDIT FILES:", [str(path) for path in paths])
+          PY
       - name: Upload review and audit files
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: monitor-review-preview
+          name: monitor-benchmark-2026-11-09_2026-11-15
           path: artifacts/
           if-no-files-found: ignore
           retention-days: 90

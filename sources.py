@@ -51,6 +51,7 @@ SOURCE_REGISTRY = [
             {"id": "sber_tg", "type": "telegram", "value": "sberbank", "url": "https://t.me/sberbank", "role": "official_channel", "required": True, "automatic": True},
             {"id": "sber_max", "type": "max", "value": "sber", "url": "https://max.ru/sber", "role": "official_channel", "required": False, "automatic": False},
             {"id": "sber_web_cards", "type": "web", "value": "https://www.sberbank.com/ru/person/bank_cards", "url": "https://www.sberbank.com/ru/person/bank_cards", "role": "bank_cards", "required": True, "automatic": True},
+            {"id": "sber_web_spasibo", "type": "web", "value": "https://www.sberbank.ru/retail/ru/person/sberspasibo", "url": "https://www.sberbank.ru/retail/ru/person/sberspasibo", "role": "official_loyalty_promotions", "required": False, "automatic": True},
         ],
     },
     {
@@ -87,6 +88,8 @@ SOURCE_REGISTRY = [
             {"id": "psb_tg", "type": "telegram", "value": "psbbank", "url": "https://t.me/psbbank", "role": "official_channel", "required": True, "automatic": True},
             {"id": "psb_max", "type": "max", "value": "psb", "url": "https://max.ru/psb", "role": "official_channel", "required": False, "automatic": False},
             {"id": "psb_web_rules", "type": "web", "value": "https://www.psbank.ru/personal/cards/rules", "url": "https://www.psbank.ru/personal/cards/rules", "role": "card_rules_and_promotions", "required": True, "automatic": True},
+            {"id": "psb_web_cashback", "type": "web", "value": "https://www.psbank.ru/personal/debetcards/yourcashback", "url": "https://www.psbank.ru/personal/debetcards/yourcashback", "role": "debit_card_promotions", "required": False, "automatic": True},
+            {"id": "psb_web_10percent", "type": "web", "value": "https://www.psbank.ru/personal/cashback-na-vse-pokupki", "url": "https://www.psbank.ru/personal/cashback-na-vse-pokupki", "role": "campaign_landing", "required": False, "automatic": True},
         ],
     },
     {
@@ -113,6 +116,7 @@ SOURCE_REGISTRY = [
             {"id": "otp_tg", "type": "telegram", "value": "otpbanknews", "url": "https://t.me/otpbanknews", "role": "official_channel", "required": True, "automatic": True},
             {"id": "otp_max", "type": "max", "value": "otpbanknews", "url": "https://max.ru/otpbanknews", "role": "official_channel", "required": False, "automatic": False},
             {"id": "otp_web_card", "type": "web", "value": "https://www.otpbank.ru/retail/cards/debit/otpcard/", "url": "https://www.otpbank.ru/retail/cards/debit/otpcard/", "role": "debit_card", "required": True, "automatic": True},
+            {"id": "otp_web_card_promos", "type": "web", "value": "https://www.otpbank.ru/retail/cards/debit/otpcard/?tab=akciya", "url": "https://www.otpbank.ru/retail/cards/debit/otpcard/?tab=akciya", "role": "card_promotion_tab", "required": False, "automatic": True},
             {"id": "otp_web_new", "type": "web", "value": "https://www.otpbank.ru/new/", "url": "https://www.otpbank.ru/new/", "role": "new_offers", "required": False, "automatic": True},
         ],
     },
@@ -137,6 +141,7 @@ def _automatic_sources(entry: dict) -> list[dict]:
         result.append(
             {
                 "id": source["id"],
+                "role": source.get("role", ""),
                 "type": source["type"],
                 "value": source["value"],
                 "required": source.get("required", False),

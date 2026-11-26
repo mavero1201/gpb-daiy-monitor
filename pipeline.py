@@ -194,6 +194,83 @@ def write_audit(start, end, evaluated, source_checks):
                 result.title,
             ])
 
+    # Full forensic journal: every extracted source record BEFORE evaluating
+    # whether it matches Daily Banking. No silent disappearance on rejection.
+    raw_path = ARTIFACT_DIR / f"raw_source_items_{period_key}.csv"
+    with raw_path.open("w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.writer(f, delimiter=";")
+        writer.writerow([
+            "bank", "source_id", "source_type", "published_at",
+            "source_url", "raw_text", "raw_html", "external_links",
+            "evaluation_stage", "decision_reason", "promo_start",
+            "promo_end", "date_status", "date_evidence", "evidence_url",
+        ])
+        for item, result in evaluated:
+            writer.writerow([
+                item.bank, item.source_id, item.source_type,
+                item.published_at.isoformat() if item.published_at else "",
+                item.url, item.text, getattr(item, "raw_html", ""),
+                json.dumps(item.external_links, ensure_ascii=False),
+                "approved_for_publication" if result.included else "rejected_after_collection",
+                result.reason,
+                result.promo_start.isoformat() if result.promo_start else "",
+                result.promo_end.isoformat() if result.promo_end else "",
+                getattr(result, "date_status", ""),
+                getattr(result, "date_evidence", ""),
+                getattr(result, "evidence_url", ""),
+            ])
+
+    # Separate source-discovery index also records documents skipped by the
+    # crawler cap or excluded by pre-evaluation keyword filters.
+    catalog_path = ARTIFACT_DIR / f"catalog_discovery_{period_key}.csv"
+    with catalog_path.open("w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.writer(f, delimiter=";")
+        writer.writerow([
+            "bank", "source_id", "source_status", "url",
+            "discovery_stage", "link_label", "date_hint_unverified",
+            "final_url", "error", "source_text_excerpt",
+        ])
+        for check in source_checks:
+            for entry in getattr(check, "catalog_index", []):
+                writer.writerow([
+                    check.bank, check.source_id, check.status,
+                    entry.get("url", ""), entry.get("stage", ""),
+                    entry.get("link_label", ""),
+                    entry.get("date_hint_unverified", ""),
+                    entry.get("final_url", ""),
+                    entry.get("error", ""),
+                    entry.get("source_text_excerpt", ""),
+                ])
+
+    # Stable weekly input for Sabina's monthly report. Unlike the Telegram
+    # message, this file preserves a machine-readable campaign identity and
+    # NEVER labels an evaluated candidate as already delivered.
+    week_registry_path = ARTIFACT_DIR / f"weekly_campaign_registry_{period_key}.csv"
+    with week_registry_path.open("w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.writer(f, delimiter=";")
+        writer.writerow([
+            "campaign_id", "start_week", "end_week", "bank", "campaign_name",
+            "campaign_start", "campaign_end", "source_publication_date",
+            "reward", "conditions", "mechanic", "goal",
+            "source_url", "source_id", "review_status",
+        ])
+        for item, result in evaluated:
+            if not result.included or not result.promo_start:
+                continue
+            if not (start.date() <= result.promo_start <= end.date()):
+                continue
+            writer.writerow([
+                promo_id(item, result),
+                start.date().isoformat(), end.date().isoformat(),
+                item.bank, result.title,
+                result.promo_start.isoformat(),
+                result.promo_end.isoformat() if result.promo_end else "",
+                item.published_at.date().isoformat() if item.published_at else "",
+                result.reward, result.conditions, result.mechanic,
+                getattr(result, "goal", ""), result.evidence_url or item.url,
+                item.source_id, "eligible_not_delivery_confirmed",
+            ])
+
     review_reasons = {
         "no_exact_period_after_recheck", "quality_unstructured_card",
         "quality_irrelevant_text", "quality_mechanic_mismatch",
@@ -278,4 +355,4 @@ def write_audit(start, end, evaluated, source_checks):
         encoding="utf-8",
     )
 
-    return [item_path, source_path, summary_path, review_path]
+    return [item_path, source_path, summary_path, review_path, raw_path, catalog_path, week_registry_path]
