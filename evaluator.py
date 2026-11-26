@@ -527,7 +527,16 @@ def period_from_matching_rules(
                 if item.published_at is None and not re.search(r"\b20\d{2}\b", excerpt):
                     continue
                 reference_date = item.published_at.date() if item.published_at else date.today()
-                period = extract_period(excerpt, reference_date)
+                declared, declaration_text = declared_campaign_period(
+                    excerpt, reference_date,
+                )
+                if declaration_text == "conflicting_campaign_periods":
+                    continue
+                # Only rules clearly describing the same reward may supply
+                # dates; the named campaign period outranks a random example.
+                period = declared
+                if period is None and "период проведения акции" not in excerpt.lower():
+                    period = extract_period(excerpt, reference_date)
                 if period:
                     return period
             start = pos + len(needle)
@@ -803,7 +812,14 @@ def evaluate(item: RawItem) -> Evaluation:
         else None
     )
     if declared_quote == "conflicting_campaign_periods":
-        period = None
+        # A conflict is a hard REVIEW result. A later one-day phrase or a
+        # second web lookup must never silently override it.
+        return Evaluation(
+            False, "conflicting_campaign_periods",
+            date_status="conflicting_campaign_periods",
+            date_evidence="Conflicting declared campaign periods",
+            evidence_url=item.url,
+        )
     if not period and item.published_at is not None:
         period = extract_single_day_event(item.text, reference_date)
 
