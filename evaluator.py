@@ -627,12 +627,14 @@ def extract_reward(post_text: str, evidence_text: str, bank: str) -> str:
 
     # A certificate is the reward, not the customer's payment amount.
     cert = re.search(
-        r"сертификат(?:\w*|\s+на\s+покупки)?[^.]{0,85}?"
-        r"(\d[\d\s]{0,10}\s*(?:₽|руб\w*))",
+        r"сертификат(?:\s+[«\"„][^»\"“]{1,55}[»\"“])?"
+        r"\s+(?:номиналом|на\s+сумму|в\s+размере)\s*"
+        r"(\d[\d\s]{0,10}\s*(?:₽|руб\w*))"
+        r"|сертификат\s+(\d[\d\s]{0,10}\s*(?:₽|руб\w*))",
         post, re.IGNORECASE,
     )
     if cert:
-        return f"Сертификат {tidy(cert.group(1))}"
+        return f"Сертификат {tidy(cert.group(1) or cert.group(2))}"
 
     for source in (post, evidence_text):
         for sentence in sentences(source):
