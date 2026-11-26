@@ -104,6 +104,14 @@ class SabinaOctoberControls(unittest.TestCase):
         self.assertEqual("сертификат", evaluator.classify_mechanic(post))
         self.assertTrue(evaluator.has_customer_action(post))
 
+    def test_certificate_does_not_borrow_purchase_threshold(self):
+        post = (
+            "Оформите банковскую карту и получите сертификат за покупки "
+            "на сумму от 3000 ₽. Номинал сертификата в посте не указан."
+        )
+        reward = evaluator.extract_reward(post, post, "ПСБ")
+        self.assertNotEqual("Сертификат 3000 ₽", reward)
+
     def test_source_registry_has_new_verified_official_entry_points(self):
         mapped = {entry["bank"]: {s["id"]: s for s in entry["sources"]} for entry in BANK_SOURCES}
         self.assertEqual(12, len(BANKS))
